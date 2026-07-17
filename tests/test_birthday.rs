@@ -27,7 +27,7 @@ fn grid(u: usize, t: usize, d: usize, cells: &BigUint) -> GridParams<'_> {
 // The two-level birthday tradeoff visits the same point multiset as a single
 // sweep, so its summed per-class spacing-collision count equals plain birthday.
 #[test]
-fn birthday_tradeoff_matches_plain_no_decimation() {
+fn test_birthday_tradeoff_matches_plain_no_decimation() {
     let (u, t, b, d) = (8usize, 2usize, 4usize, 0usize);
     let cells = BigUint::from(1u128 << (u * t)); // 2^16
     let g = grid(u, t, d, &cells);
@@ -59,7 +59,7 @@ fn birthday_tradeoff_matches_plain_no_decimation() {
 // cells == 2^N exactly (no strictly-wider type needed). At the 2^32 boundary
 // u32 and u64 storage must produce identical counts.
 #[test]
-fn birthday_width_boundary_u32_matches_u64() {
+fn test_birthday_width_boundary_u32_matches_u64() {
     let (u, t) = (16usize, 2usize);
     let cells = BigUint::from(1u128 << 32); // exactly 2^32
     let g = grid(u, t, 0, &cells);
@@ -82,7 +82,7 @@ fn birthday_width_boundary_u32_matches_u64() {
 // complete and agree (the counts are ~0 at this density; the value of the
 // test is exercising the wrap arithmetic at the type limit).
 #[test]
-fn birthday_2_pow_128_cells_tradeoff_matches_plain() {
+fn test_birthday_2_pow_128_cells_tradeoff_matches_plain() {
     let (u, t, b) = (64usize, 2usize, 2usize);
     let cells = BigUint::from(1u8) << 128;
     let g = grid(u, t, 0, &cells);
@@ -110,7 +110,7 @@ fn birthday_2_pow_128_cells_tradeoff_matches_plain() {
 // Same property with decimation on: both runs decimate the same stream, so the
 // accepted points (and therefore the spacings) match.
 #[test]
-fn birthday_tradeoff_matches_plain_with_decimation() {
+fn test_birthday_tradeoff_matches_plain_with_decimation() {
     let (u, t, b, d) = (10usize, 2usize, 4usize, 2usize);
     let cells = BigUint::from(1u128 << ((u - d) * t)); // 2^16 effective
     let g = grid(u, t, d, &cells);

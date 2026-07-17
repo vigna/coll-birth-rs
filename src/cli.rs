@@ -12,7 +12,7 @@ use clap::Parser;
 #[command(
     author,
     version,
-    about = "Runs a collision or birthday-spacings test. Please use RAYON_NUM_THREADS to customize the number of threads.",
+    about = "Runs a collision or birthday-spacings test; use RAYON_NUM_THREADS to customize the number of threads.",
     next_line_help = true,
     max_term_width = 100
 )]
@@ -23,7 +23,7 @@ pub struct Args {
     /// The dimension of the test; the cell count is (2ᵘ ⁻ ᵈ)ᵗ.​
     pub t: usize,
 
-    /// Number of memory locations. The number of points is m · 2ᵇ (approximate
+    /// Number of memory locations: the number of points is m · 2ᵇ (approximate
     /// when decimating), the number of samples is m · 2ᵇ · 2ᵗᵈ, and the number
     /// of calls to the generator is t · m · (2ᵇ)² · 2ᵗᵈ (the birthday-spacings
     /// test adds a further factor of 2ᵇ for its second level).​
@@ -61,7 +61,7 @@ pub struct Args {
     #[arg(short, long, default_value_t = 1)]
     pub reps: usize,
 
-    /// PRNG seed. Accepts decimal, or a 0x/0o/0b prefix for hexadecimal, octal, or binary; underscores may separate digits.​
+    /// PRNG seed; accepts decimal, or a 0x/0o/0b prefix for hexadecimal, octal, or binary (underscores may separate digits).​
     #[arg(short = 'S', long, default_value_t = 0, value_parser = parse_u64)]
     pub seed: u64,
 
@@ -70,8 +70,8 @@ pub struct Args {
     pub pretty_p: bool,
 
     /// Generate data in parallel: the orbit is split into contiguous segments,
-    /// one generated per thread. Jump-capable generators jump to each segment
-    /// start, others reach it with a sequential pre-scan. This setting is
+    /// one generated per thread; jump-capable generators jump to each segment
+    /// start, others reach it with a sequential pre-scan; this setting is
     /// detrimental if the generator is not jump-capable and there are no
     /// tradeoff bits.​
     #[arg(short = 'P', long)]
@@ -79,7 +79,7 @@ pub struct Args {
 
     /// Run only one of the 2ᵇ tradeoff units (0-based) and print its raw count and
     /// its λ share, so the 2ᵇ units can be distributed across invocations and
-    /// recombined. Collision: value-interval K. Birthday: spacing-class K. Requires -b.​
+    /// recombined; collision: value-interval K; birthday: spacing-class K; requires -b.​
     #[arg(long, value_name = "K")]
     pub pass: Option<u64>,
 }
@@ -99,6 +99,16 @@ impl Args {
         }
         if self.u < 1 {
             Self::die("u must be at least 1");
+        }
+        // Since u - d >= 1, any t > 128 makes the cell count 2^((u-d)·t) exceed
+        // 2^128; rejecting it here also keeps the `t as u32` cast in main() and
+        // the t·(u - d) product below from silently truncating or wrapping for
+        // absurd t values, which would defeat the cell-count check.
+        if self.t > 128 {
+            Self::die(&format!(
+                "t ({}) must be at most 128 (the cell count would exceed 2¹²⁸)",
+                self.t
+            ));
         }
         // Guard before 64 - self.s so an out-of-range shift cannot underflow the
         // usize subtraction (which would silently accept the value and later panic

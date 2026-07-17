@@ -80,7 +80,7 @@ macro_rules! mwc_128_64 {
             }
 
             pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
-                use num::BigUint;
+                use ::num::BigUint;
                 let b = BigUint::from(1u128 << 64);
                 let a = BigUint::from(MWC_A1);
                 let m = &a * &b - BigUint::from(1u8); // a·b − 1
@@ -133,7 +133,7 @@ macro_rules! mwc_192_64 {
             }
 
             pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
-                use num::BigUint;
+                use ::num::BigUint;
                 let b = BigUint::from(1u128 << 64);
                 let a = BigUint::from(MWC_A2);
                 let m = &a * &b * &b - BigUint::from(1u8); // a·b² − 1
@@ -192,7 +192,7 @@ macro_rules! mwc_256_64 {
             }
 
             pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
-                use num::BigUint;
+                use ::num::BigUint;
                 let b = BigUint::from(1u128 << 64);
                 let a = BigUint::from(MWC_A3);
                 let m = &a * &b * &b * &b - BigUint::from(1u8); // a·b³ − 1
@@ -253,7 +253,7 @@ macro_rules! mwc_128_32 {
             }
 
             pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
-                use num::BigUint;
+                use ::num::BigUint;
                 let b = BigUint::from(1u64 << 32);
                 let a = BigUint::from(MWC_A3);
                 let m = &a * &b * &b * &b - BigUint::from(1u8); // a·b³ − 1 = a·2⁹⁶ − 1
@@ -737,13 +737,13 @@ mod skip_tests {
     // For generators without jump-ahead (try_skip returns Err), there is
     // nothing to verify and the test passes trivially.
     #[test]
-    fn skip_matches_repeated_next() {
+    fn test_skip_matches_repeated_next() -> anyhow::Result<()> {
         let seed = 0x0123_4567_89ab_cdef;
         // Cheap-to-step values (sequential stepping must stay fast).
         for &n in &[0u64, 1, 2, 7, 1000, 100_000] {
             let mut a = Prng::new(seed);
             if a.try_skip(n).is_err() {
-                return; // generator has no jump-ahead; nothing to check
+                return Ok(()); // generator has no jump-ahead; nothing to check
             }
             let mut b = Prng::new(seed);
             for _ in 0..n {
@@ -761,11 +761,12 @@ mod skip_tests {
         // for counter generators; exercises the doubling (LCG) and modpow (MWC)
         // jump-ahead with large exponents once those generators gain try_skip.
         let (x, y) = (1u64 << 40, (1u64 << 41) + 12_345);
+        let skip_err = |()| anyhow::anyhow!("try_skip failed on a skip-capable generator");
         let mut p = Prng::new(seed);
-        p.try_skip(x).unwrap();
-        p.try_skip(y).unwrap();
+        p.try_skip(x).map_err(skip_err)?;
+        p.try_skip(y).map_err(skip_err)?;
         let mut q = Prng::new(seed);
-        q.try_skip(x + y).unwrap();
+        q.try_skip(x + y).map_err(skip_err)?;
         for k in 0..64 {
             assert_eq!(
                 p.next_u64(),
@@ -773,5 +774,6 @@ mod skip_tests {
                 "skip composition failed at output {k}"
             );
         }
+        Ok(())
     }
 }

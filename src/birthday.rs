@@ -74,17 +74,23 @@ pub fn run_birthday<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL:
     (c, len)
 }
 
-/// Parallel in-place spacings of a sorted slice, differencing each element against
-/// its predecessor in the sorted order.
+/// Parallel in-place computation of the spacings of a globally-sorted point
+/// set: each element is replaced by its difference with its predecessor in the
+/// sorted order, and the first element receives the circular wrap-around
+/// `cells - max + min`.
 ///
-/// `predecessor` is the largest value strictly below this slice (the previous
-/// value interval maximum) so the first element receives `v[0] - predecessor`.
-/// When it is `None` the first element is the global minimum and is left untouched
-/// (its circular wrap-around spacing is applied separately by the caller).
-pub(crate) fn compute_spacings_with_predecessor<T: Cell>(v: &mut [T], predecessor: Option<T>) {
+/// The wrap-around lies in `[1..=cells]` and reaches `cells` exactly when `min
+/// == max`, which may not be representable (`cells` can be 2*ⁿ* in *n*-bit
+/// storage). It is therefore evaluated through the always-representable `cells - 1`,
+/// and in the degenerate case replaced by a nonzero stand-in: all other
+/// spacings are then zero, so the collision count is unaffected.
+pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
     if v.is_empty() {
         return;
     }
+    let global_min = v[0];
+    let global_max = *v.last().unwrap();
+
     // Aim for ~10 chunks per thread, with a floor of 1024 to amortise scheduling overhead.
     let chunk_size = (v.len() / (parallelism() * 10)).max(1024);
 
@@ -105,29 +111,8 @@ pub(crate) fn compute_spacings_with_predecessor<T: Cell>(v: &mut [T], predecesso
         .skip(1)
         .for_each(|(i, c)| c[0] -= chunk_tails[i - 1]);
 
-    // The very first element: border spacing to the previous interval, or left as the
-    // global minimum (its wrap-around is deferred) when there is no predecessor.
-    if let Some(p) = predecessor {
-        v[0] -= p;
-    }
-}
-
-/// Parallel in-place computation of the spacings of a globally-sorted point set:
-/// like [`compute_spacings_with_predecessor`] with no predecessor, but the first
-/// element receives the circular wrap-around `cells - max + min`.
-///
-/// The wrap-around lies in `[1..=cells]` and reaches `cells` exactly when `min
-/// == max`, which may not be representable (`cells` can be 2*ⁿ* in *n*-bit
-/// storage). It is therefore evaluated through the always-representable `cells - 1`,
-/// and in the degenerate case replaced by a nonzero stand-in: all other
-/// spacings are then zero, so the collision count is unaffected.
-pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
-    if v.is_empty() {
-        return;
-    }
-    let global_min = v[0];
-    let global_max = *v.last().unwrap();
-    compute_spacings_with_predecessor(v, None); // leaves v[0] == global minimum
+    // The very first element still holds the global minimum: give it the
+    // circular wrap-around spacing.
     if global_min == global_max {
         v[0] = T::from_u64(1);
     } else {
@@ -467,7 +452,10 @@ pub fn run_birthday_parallel<T: Cell>(
         points,
         size_of::<T>() * 8,
         points >> b,
-        (live_elems * size_of::<T>()) as f64 / 2.0f64.powi(30),
+        // In f64: an extreme configuration can make the byte count overflow a
+        // usize product (the allocation itself fails cleanly later, in
+        // alloc_mmap), but the header should still print.
+        live_elems as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
         mode_suffix
     );
     eprintln!(
@@ -563,42 +551,39 @@ pub fn run_birthday_parallel<T: Cell>(
                 // first interval has no predecessor (its wrap is deferred), so it starts
                 // at 1. The spacings are never reused (interval_max and interval[0] were
                 // already captured) and the class buffer is sorted later, so order is
-                // irrelevant: keep interval read-only and compact in parallel with a
-                // count-then-write two-pass over num_cpus chunks.
+                // irrelevant: keep interval read-only and compact on the Rayon
+                // global pool with a count-then-write two-pass over num_cpus chunks.
                 let start = if prev_max.is_none() { 1 } else { 0 };
                 let interval: &[T] = interval;
                 let span = total - start;
+                let chunk_bounds = |c: usize| {
+                    (
+                        start + c * span / num_cpus,
+                        start + (c + 1) * span / num_cpus,
+                    )
+                };
+                let spacing_at = |i: usize| {
+                    if i == 0 {
+                        interval[0] - prev_max.unwrap()
+                    } else {
+                        interval[i] - interval[i - 1]
+                    }
+                };
                 // Pass 1: count matching spacings per chunk.
-                let counts: Box<[usize]> = std::thread::scope(|scope| {
-                    let handles: Vec<_> = (0..num_cpus)
-                        .map(|c| {
-                            scope.spawn(move || {
-                                let (lo, hi) = (
-                                    start + c * span / num_cpus,
-                                    start + (c + 1) * span / num_cpus,
-                                );
-                                let mut cnt = 0usize;
-                                for i in lo..hi {
-                                    let s = if i == 0 {
-                                        interval[0] - prev_max.unwrap()
-                                    } else {
-                                        interval[i] - interval[i - 1]
-                                    };
-                                    if s & spacing_mask == class_target {
-                                        cnt += 1;
-                                    }
-                                }
-                                cnt
-                            })
-                        })
-                        .collect();
-                    handles.into_iter().map(|h| h.join().unwrap()).collect()
-                });
+                let counts: Vec<usize> = (0..num_cpus)
+                    .into_par_iter()
+                    .map(|c| {
+                        let (lo, hi) = chunk_bounds(c);
+                        (lo..hi)
+                            .filter(|&i| spacing_at(i) & spacing_mask == class_target)
+                            .count()
+                    })
+                    .collect();
                 let matched: usize = counts.iter().sum();
                 if class_len + matched > class.len() {
                     bin_overflow("a birthday-spacings class");
                 }
-                // Phase 2: write each chunk matches into its own disjoint slot
+                // Pass 2: write each chunk's matches into its own disjoint slot
                 // of the class buffer (prefix-sum offsets), recomputing the
                 // same spacings.
                 {
@@ -609,27 +594,15 @@ pub fn run_birthday_parallel<T: Cell>(
                         dsts.push(head);
                         rest = tail;
                     }
-                    let dsts = dsts.into_boxed_slice();
-                    std::thread::scope(|scope| {
-                        for (c, dst) in dsts.into_iter().enumerate() {
-                            scope.spawn(move || {
-                                let (lo, hi) = (
-                                    start + c * span / num_cpus,
-                                    start + (c + 1) * span / num_cpus,
-                                );
-                                let mut w = 0usize;
-                                for i in lo..hi {
-                                    let s = if i == 0 {
-                                        interval[0] - prev_max.unwrap()
-                                    } else {
-                                        interval[i] - interval[i - 1]
-                                    };
-                                    if s & spacing_mask == class_target {
-                                        dst[w] = s;
-                                        w += 1;
-                                    }
-                                }
-                            });
+                    dsts.into_par_iter().enumerate().for_each(|(c, dst)| {
+                        let (lo, hi) = chunk_bounds(c);
+                        let mut w = 0usize;
+                        for i in lo..hi {
+                            let s = spacing_at(i);
+                            if s & spacing_mask == class_target {
+                                dst[w] = s;
+                                w += 1;
+                            }
                         }
                     });
                 }
@@ -685,14 +658,26 @@ pub fn run_birthday_parallel<T: Cell>(
         let lambda_rep = test_lambda(rep_points, cells_f64, true);
         lambda_sum += lambda_rep;
         let elapsed = psw.lap();
-        let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
-        if args.reps > 1 {
-            eprintln!(
-                "[{elapsed:.3}s] {rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
-                format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
-            );
+        if args.pass.is_some() {
+            // Single-pass mode: `rep_coll` is one spacing-class's count (mean
+            // λ/2ᵇ), so a p-value against the full per-rep mean would be
+            // meaningless; the recombinable count/λ-share pair is printed by
+            // main. Report the raw counts only.
+            if args.reps > 1 {
+                eprintln!("[{elapsed:.3}s] {rep_coll}\tcombined: {tot}");
+            } else {
+                eprintln!("[{elapsed:.3}s] {rep_coll}");
+            }
         } else {
-            eprintln!("[{elapsed:.3}s] {rep_coll}\tp={rep_p}");
+            let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
+            if args.reps > 1 {
+                eprintln!(
+                    "[{elapsed:.3}s] {rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
+                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                );
+            } else {
+                eprintln!("[{elapsed:.3}s] {rep_coll}\tp={rep_p}");
+            }
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());
@@ -710,7 +695,7 @@ mod spacing_tests {
     // of 2⁶⁴ cells have spacings {7, 2⁶⁴ − 11} and wrap 2⁶⁴ − (2⁶⁴ − 1) + 3 = 4,
     // none of which overflow u64 despite cells itself being unrepresentable.
     #[test]
-    fn wrap_at_width_boundary_is_exact() {
+    fn test_wrap_at_width_boundary_is_exact() {
         let cells = BigUint::from(1u8) << 64;
         let mut v = [3u64, 10, u64::MAX];
         compute_spacings(&mut v, &cells);
@@ -723,7 +708,7 @@ mod spacing_tests {
     // would equal cells == 2⁶⁴. It is replaced by a nonzero stand-in; the n − 1
     // zero spacings then yield exactly n − 2 collisions, the true count.
     #[test]
-    fn degenerate_equal_points_at_width_boundary() {
+    fn test_degenerate_equal_points_at_width_boundary() {
         let cells = BigUint::from(1u8) << 64;
         let mut v = [7u64, 7, 7, 7];
         compute_spacings(&mut v, &cells);

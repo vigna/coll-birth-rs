@@ -23,22 +23,38 @@ use crate::util::{Stopwatch, parallelism, superscript};
 
 /// Allocates an mmap-backed slice and eagerly faults it as transparent huge pages.
 ///
-/// We deliberately do not pass [`MmapFlags::MAP_POPULATE`], as it would
-/// prefault the whole region as base (4 KiB) pages during the `mmap()` syscall.
+/// We deliberately do not pass [`MmapFlags::POPULATE`] (`MAP_POPULATE`), as it
+/// would prefault the whole region as base (4 KiB) pages during the `mmap()`
+/// syscall.
 ///
 /// Instead, we use [`MmapFlags::TRANSPARENT_HUGE_PAGES`] and prefault the
 /// region ourselves by touching one byte per 2 MiB, so each fault takes the
 /// huge-page path. On a kernel with THP disabled the touches still prefault (as
 /// base pages), so behaviour degrades gracefully rather than regressing.
 ///
-/// [`MmapFlags::MAP_POPULATE`]: mmap.rs::MmapFlags::MAP_POPULATE
-/// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: mmap.rs::MmapFlags::TRANSPARENT_HUGE_PAGES
+/// [`MmapFlags::POPULATE`]: mmap_rs::MmapFlags::POPULATE
+/// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: mmap_rs::MmapFlags::TRANSPARENT_HUGE_PAGES
 pub(crate) fn alloc_mmap<T>(n: usize) -> MmapMut {
-    let mut mapped = MmapOptions::new(n * size_of::<T>())
-        .expect("mmap size overflow")
-        .with_flags(MmapFlags::TRANSPARENT_HUGE_PAGES)
-        .map_mut()
-        .expect("mmap() failed");
+    // A failed or unrepresentable allocation is a resource/configuration error,
+    // not a program bug: report it cleanly (no backtrace, no abort message) so
+    // the user knows to reduce m or add tradeoff bits.
+    fn alloc_error(n: usize, detail: &dyn std::fmt::Display) -> ! {
+        eprintln!(
+            "\ncannot allocate a buffer of {n} memory locations: {detail}; \
+             reduce m or use more tradeoff bits (-b)"
+        );
+        std::process::exit(1);
+    }
+    let bytes_len = n
+        .checked_mul(size_of::<T>())
+        .unwrap_or_else(|| alloc_error(n, &"the size in bytes overflows usize"));
+    let mut mapped = MmapOptions::new(bytes_len)
+        .and_then(|options| {
+            options
+                .with_flags(MmapFlags::TRANSPARENT_HUGE_PAGES)
+                .map_mut()
+        })
+        .unwrap_or_else(|e| alloc_error(n, &e));
     const HUGE_PAGE: usize = 2 * 1024 * 1024;
     let bytes: &mut [u8] = &mut mapped;
     bytes
@@ -681,7 +697,9 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
         // point count is m · 2ᵇ (only ~points / 2ᵇ are ever resident), mirroring
         // the collision tradeoff; without one, pass_factor is 1 and points = m.
         let m = args.m.unwrap_or(max_points / pass_factor.max(1));
-        points = m.checked_mul(pass_factor).expect("m · 2ᵇ overflows usize");
+        points = m.checked_mul(pass_factor).unwrap_or_else(|| {
+            Args::die("the number of points m · 2ᵇ overflows the address space (reduce m or b)")
+        });
         if points > max_points {
             Args::die(
                 "the given combination of memory, repetitions and cells is out of range \
@@ -690,12 +708,17 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
         }
         test_lambda(points, effective_cells_f64, true)
     } else {
+        // Cap the default m so that m · 2ᵇ always fits a usize; an explicit,
+        // too-large m still fails the checked multiplication below, but as a
+        // clean CLI error rather than a panic.
         let m_default = (cells.clone() / pass_factor)
-            .min(usize::MAX.into())
+            .min((usize::MAX / pass_factor).into())
             .to_usize()
             .unwrap();
         let m = args.m.unwrap_or(m_default);
-        points = m.checked_mul(pass_factor).expect("m · 2ᵇ overflows usize");
+        points = m.checked_mul(pass_factor).unwrap_or_else(|| {
+            Args::die("the number of points m · 2ᵇ overflows the address space (reduce m or b)")
+        });
 
         if BigUint::from(points) > *cells {
             Args::die(&format!(
@@ -796,7 +819,10 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         points,
         size_of::<T>() * 8,
         points >> tradeoff_b,
-        (buf_len * size_of::<T>()) as f64 / 2.0f64.powi(30),
+        // In f64: an extreme configuration can make the byte count overflow a
+        // usize product (the allocation itself fails cleanly later, in
+        // alloc_mmap), but the header should still print.
+        buf_len as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
         headroom_suffix,
         mode_suffix
     );
@@ -961,14 +987,26 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         // is random and conditioning avoids overdispersion.
         let lambda_rep = test_lambda(used, effective_cells_f64, args.birthday_spacings);
         lambda_sum += lambda_rep;
-        let rep_p = format_p_value(p_value(c as f64, lambda_rep), args.pretty_p);
-        if args.reps > 1 {
-            eprintln!(
-                "{c}\tp={rep_p}\tcombined: {tot}\tp={}",
-                format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
-            );
+        if args.pass.is_some() {
+            // Single-pass mode: `used` is one unit's share of the points, so a
+            // Poisson mean conditioned on it does not match the unit's count
+            // distribution; the recombinable count/λ-share pair is printed by
+            // main. Report the raw counts only.
+            if args.reps > 1 {
+                eprintln!("{c}\tcombined: {tot}");
+            } else {
+                eprintln!("{c}");
+            }
         } else {
-            eprintln!("{c}\tp={rep_p}");
+            let rep_p = format_p_value(p_value(c as f64, lambda_rep), args.pretty_p);
+            if args.reps > 1 {
+                eprintln!(
+                    "{c}\tp={rep_p}\tcombined: {tot}\tp={}",
+                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                );
+            } else {
+                eprintln!("{c}\tp={rep_p}");
+            }
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());
@@ -985,7 +1023,7 @@ mod prescan_tests {
     // each snapshot exactly where a jump-by-(boundary*t) would, with a
     // hand-computed ground truth (no try_skip in the assertions).
     #[test]
-    fn prescan_lands_at_jump_targets() {
+    fn test_prescan_lands_at_jump_targets() {
         let seed = 0x1234_5678_9abc_def0u64;
         let t = 3usize;
         let total = 1000usize;
@@ -1044,7 +1082,7 @@ mod compact_tests {
     }
 
     #[test]
-    fn compaction_cases() {
+    fn test_compaction_cases() {
         check(&[5, 5, 5], &[5, 5, 5]); // all full: plain no-op
         check(&[5, 5, 5], &[3, 4, 2]); // generic gaps
         check(&[5, 5, 5], &[0, 4, 2]); // first empty

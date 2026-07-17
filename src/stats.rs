@@ -178,7 +178,7 @@ mod tests {
     // collapse to "1": computing `1 - p_left` in an f64 rounds to exactly 1.0 once
     // p_left < machine epsilon, destroying the tail. This pins the precision.
     #[test]
-    fn deep_left_tail_renders_as_one_minus_eps() {
+    fn test_deep_left_tail_renders_as_one_minus_eps() {
         let s = format_p_value(p_value(0.0, 700.0), true);
         assert!(
             s.starts_with("1 − ") && s.len() > "1 − ".len(),
@@ -189,7 +189,7 @@ mod tests {
     // Two distinct deep-left-tail counts must produce distinct pretty strings:
     // the old `1 - p_left` collapse mapped both to "1".
     #[test]
-    fn distinct_deep_tails_render_distinctly() {
+    fn test_distinct_deep_tails_render_distinctly() {
         let a = format_p_value(p_value(0.0, 700.0), true);
         let b = format_p_value(p_value(0.0, 600.0), true);
         assert_ne!(a, b, "different left-tail depths must format differently");
@@ -199,7 +199,7 @@ mod tests {
     // to machine precision but is still a left-tail anomaly: print the sentinel
     // `1 − 1e-307` (in both pretty and plain mode) rather than a bare "1".
     #[test]
-    fn underflowed_left_tail_prints_sentinel() {
+    fn test_underflowed_left_tail_prints_sentinel() {
         assert_eq!(format_p_value(p_value(0.0, 750.0), true), "1 − 1e-307");
         assert_eq!(format_p_value(p_value(0.0, 750.0), false), "1 − 1e-307");
     }
@@ -207,7 +207,7 @@ mod tests {
     // A small right-tail p-value (too many collisions) is unaffected and prints
     // as a plain tiny decimal.
     #[test]
-    fn right_tail_small_pvalue_is_plain() {
+    fn test_right_tail_small_pvalue_is_plain() {
         let s = format_p_value(p_value(700.0, 1.0), false);
         assert!(
             !s.starts_with("1-") && s != "1",

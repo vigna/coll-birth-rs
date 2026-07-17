@@ -382,7 +382,10 @@ pub fn run_test_parallel<T: Cell>(
         points,
         size_of::<T>() * 8,
         points >> tradeoff_b,
-        (total_buf * size_of::<T>()) as f64 / 2.0f64.powi(30),
+        // In f64: an extreme configuration can make the byte count overflow a
+        // usize product (the allocation itself fails cleanly later, in
+        // alloc_mmap), but the header should still print.
+        total_buf as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
         mode_suffix
     );
 
@@ -437,13 +440,18 @@ pub fn run_test_parallel<T: Cell>(
                 eprint!("Checkpoint {}/{}: gen...", k, num_checkpoints);
                 let target_scanned = scan_total * k / num_checkpoints;
                 let stage = target_scanned - scanned;
-                let sbase = stage / num_cpus;
-                let srem = stage % num_cpus;
+                // A stage smaller than the thread count would otherwise produce
+                // boundaries equal to the stage length, which the pre-scan
+                // contract forbids (and fewer snapshots than sub-regions); cap
+                // the fan-out to the stage size.
+                let stage_cpus = num_cpus.min(stage).max(1);
+                let sbase = stage / stage_cpus;
+                let srem = stage % stage_cpus;
                 let schunk = |i: usize| sbase + if i < srem { 1 } else { 0 };
                 let sstart = |i: usize| i * sbase + i.min(srem);
 
                 // Per-thread orbit starts within this stage's sample-range.
-                let boundaries: Box<[usize]> = (0..num_cpus).map(sstart).collect();
+                let boundaries: Box<[usize]> = (0..stage_cpus).map(sstart).collect();
                 let snapshots =
                     partition.snapshots((rep - 1) * scan_total + scanned, stage, &boundaries, None);
 
@@ -454,7 +462,7 @@ pub fn run_test_parallel<T: Cell>(
                 // gaps compacted away.
                 let stage_len = gen_unit_contiguous::<T>(
                     stage_buf,
-                    &stage_caps,
+                    &stage_caps[..stage_cpus],
                     &snapshots,
                     &params,
                     &schunk,
@@ -582,14 +590,26 @@ pub fn run_test_parallel<T: Cell>(
         // Condition the per-rep Poisson mean on the points actually kept.
         let lambda_rep = test_lambda(total_points, cells_f64, false);
         lambda_sum += lambda_rep;
-        let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
-        if args.reps > 1 {
-            eprintln!(
-                "{rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
-                format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
-            );
+        if args.pass.is_some() {
+            // Single-pass mode: `total_points` is one value-interval's share, so
+            // a Poisson mean conditioned on it does not match the interval's
+            // count distribution; the recombinable count/λ-share pair is printed
+            // by main. Report the raw counts only.
+            if args.reps > 1 {
+                eprintln!("{rep_coll}\tcombined: {tot}");
+            } else {
+                eprintln!("{rep_coll}");
+            }
         } else {
-            eprintln!("{rep_coll}\tp={rep_p}");
+            let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
+            if args.reps > 1 {
+                eprintln!(
+                    "{rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
+                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                );
+            } else {
+                eprintln!("{rep_coll}\tp={rep_p}");
+            }
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());

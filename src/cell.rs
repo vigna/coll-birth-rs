@@ -192,7 +192,7 @@ mod tests {
     // never rejects), hence the gate.
     #[cfg(not(feature = "incr"))]
     #[test]
-    fn decimate_once_consumes_t_draws_and_is_dense() {
+    fn test_decimate_once_consumes_t_draws_and_is_dense() {
         let (t, u, s, d) = (3usize, 12usize, 0usize, 3usize);
         let bound = 1u128 << ((u - d) * t);
         let mut a = Prng::new(0xABCD_1234);
@@ -228,10 +228,10 @@ mod tests {
         );
     }
 
-    // (Decimation density is covered by decimate_once_consumes_t_draws_and_is_dense.)
+    // (Decimation density is covered by test_decimate_once_consumes_t_draws_and_is_dense.)
 
     #[test]
-    fn dim_specialization_matches_runtime_fallback() {
+    fn test_dim_specialization_matches_runtime_fallback() {
         let (u, s) = (12usize, 0usize);
         let mut a = Prng::new(12_345);
         let mut b = a; // Prng: Copy → identical stream
@@ -243,7 +243,7 @@ mod tests {
     }
 
     #[test]
-    fn full_matches_shift_when_u_is_64() {
+    fn test_full_matches_shift_when_u_is_64() {
         let (u, s) = (64usize, 0usize);
         let mut a = Prng::new(999);
         let mut b = a;

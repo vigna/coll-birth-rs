@@ -48,7 +48,7 @@ fn cells_for(args: &Args) -> BigUint {
 // counts must sum to a full -b run, in both the sequential and parallel paths.
 // This pins the recombination guarantee of the single-pass design.
 #[test]
-fn single_pass_collision_sum_matches_full() {
+fn test_single_pass_collision_sum_matches_full() {
     let seed = 0xABCD_1234_5678_9ABC;
     let b = 2u32;
     let mut args = make_args(16, 2, 1 << 16, Some(b as usize), seed);
@@ -86,7 +86,7 @@ fn single_pass_collision_sum_matches_full() {
 }
 
 #[test]
-fn single_pass_birthday_sum_matches_full() {
+fn test_single_pass_birthday_sum_matches_full() {
     let seed = 0x0BAD_F00D_DEAD_BEEF;
     let b = 2u32;
     let mut args = make_args(30, 2, 1 << 16, Some(b as usize), seed);
@@ -118,7 +118,7 @@ fn single_pass_birthday_sum_matches_full() {
 // parallel run must equal the sequential run for the same seed: jump-capable
 // generators reach each thread's start via jump-ahead, others via pre-scan.
 #[test]
-fn faithful_plain_matches_sequential() {
+fn test_faithful_plain_matches_sequential() {
     let seed = 0x00C0_FFEE_1234_5678;
     let args = make_args(12, 2, 1 << 18, None, seed);
     let cells = cells_for(&args);
@@ -132,7 +132,7 @@ fn faithful_plain_matches_sequential() {
 }
 
 #[test]
-fn faithful_tradeoff_matches_sequential() {
+fn test_faithful_tradeoff_matches_sequential() {
     let seed = 0x0D15_EA5E_0BAD_F00D;
     let args = make_args(12, 2, 1 << 14, Some(2), seed);
     let cells = cells_for(&args);
@@ -148,7 +148,7 @@ fn faithful_tradeoff_matches_sequential() {
 // Fixed-sample decimation is faithfully parallel: scanning a fixed sample
 // budget makes each thread's contiguous sample-range reachable by jump/pre-scan.
 #[test]
-fn faithful_decimation_matches_sequential() {
+fn test_faithful_decimation_matches_sequential() {
     let seed = 0x0DEC_1A7E_0000_0001;
     let mut args = make_args(14, 2, 1 << 14, None, seed);
     args.decimation_bits = Some(2);
@@ -165,7 +165,7 @@ fn faithful_decimation_matches_sequential() {
 }
 
 #[test]
-fn faithful_decimation_tradeoff_matches_sequential() {
+fn test_faithful_decimation_tradeoff_matches_sequential() {
     let seed = 0x0DEC_1A7E_0000_0002;
     let mut args = make_args(14, 2, 1 << 12, Some(2), seed);
     args.decimation_bits = Some(2);
@@ -193,7 +193,7 @@ fn checkpoint_args(seed: u64) -> (Args, BigUint) {
 
 // Parallel checkpoints must be faithful: same final cumulative count for any P.
 #[test]
-fn parallel_checkpoints_match_across_cpus() {
+fn test_parallel_checkpoints_match_across_cpus() {
     let (args, cells) = checkpoint_args(0x0C0C_0C0C_0000_0001);
     let (lambda, points) = compute_lambda_and_points(&args, &cells);
     let r1 = run_test_parallel::<u64>(&args, points, &cells, lambda, 1);
@@ -203,7 +203,7 @@ fn parallel_checkpoints_match_across_cpus() {
 
 // P=1 parallel checkpoints must equal the sequential checkpoint runner.
 #[test]
-fn parallel_checkpoints_p1_match_sequential_runner() {
+fn test_parallel_checkpoints_p1_match_sequential_runner() {
     let (args, cells) = checkpoint_args(0x0C0C_0C0C_0000_0002);
     let (lambda, points) = compute_lambda_and_points(&args, &cells);
     let seq = run_test::<u64>(&args, points, &cells, lambda);
@@ -218,7 +218,7 @@ fn parallel_checkpoints_p1_match_sequential_runner() {
 // any CPU count: the gathered interval is the same point multiset, so the
 // spacings and their collisions match.
 #[test]
-fn faithful_birthday_plain_matches_sequential() {
+fn test_faithful_birthday_plain_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0001;
     let mut args = make_args(20, 2, 40_000, None, seed);
     args.birthday_spacings = true;
@@ -244,7 +244,7 @@ fn faithful_birthday_plain_matches_sequential() {
 // parallel runs hit the designed non-uniformity abort.
 #[cfg(not(any(feature = "lcg_32_32_0xec65035", feature = "lcg_32_32_0x915f77f5")))]
 #[test]
-fn faithful_birthday_decimation_matches_sequential() {
+fn test_faithful_birthday_decimation_matches_sequential() {
     let seed = 3;
     let mut args = make_args(30, 2, 40_000, None, seed);
     args.birthday_spacings = true;
@@ -268,7 +268,7 @@ fn faithful_birthday_decimation_matches_sequential() {
 
 // Same, with the two-level top-bit tradeoff (b > 0).
 #[test]
-fn faithful_birthday_tradeoff_matches_sequential() {
+fn test_faithful_birthday_tradeoff_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0002;
     let mut args = make_args(20, 2, 10_000, Some(2), seed);
     args.birthday_spacings = true;
@@ -291,7 +291,7 @@ fn faithful_birthday_tradeoff_matches_sequential() {
 // is evaluated through cells − 1, so no strictly-wider type is needed): the
 // parallel two-level tradeoff must still match the sequential runner.
 #[test]
-fn faithful_birthday_boundary_u32_matches_sequential() {
+fn test_faithful_birthday_boundary_u32_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0003;
     let mut args = make_args(16, 2, 12_500, Some(2), seed);
     args.birthday_spacings = true;

@@ -32,7 +32,7 @@ fn grid(u: usize, t: usize, d: usize, cells: &BigUint) -> GridParams<'_> {
 // Summing collisions over 2^(t·b) tradeoff passes equals a single run on the
 // same point stream (decimation off).
 #[test]
-fn tradeoff_sum_equals_single_run_no_decimation() {
+fn test_tradeoff_sum_equals_single_run_no_decimation() {
     let (u, t, b, d) = (8usize, 2usize, 4usize, 0usize);
     let cells = BigUint::from(1u128 << (u * t)); // 2^16
     let g = grid(u, t, d, &cells);
@@ -71,7 +71,7 @@ fn tradeoff_sum_equals_single_run_no_decimation() {
 // Same exactness property with decimation on (d > 0): both runs decimate the
 // same stream, so kept points and their collisions match.
 #[test]
-fn tradeoff_sum_equals_single_run_with_decimation() {
+fn test_tradeoff_sum_equals_single_run_with_decimation() {
     let (u, t, b, d) = (10usize, 2usize, 4usize, 2usize);
     // effective cell space after decimation: 2^((u-d)*t) = 2^16
     let cells = BigUint::from(1u128 << ((u - d) * t));
