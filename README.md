@@ -147,7 +147,7 @@ Pass 1/4: gen...[12.575s] sort...[25.045s] count...[1.047s], 7999983191 points, 
 Pass 2/4: gen...[12.543s] sort...[21.221s] count...[1.048s], 7999927485 points, 0 collisions, p=0.9990305368624458; combined: 15999910676 points, 0 collisions, p=1 − 9.39767956526281e-7
 Pass 3/4: gen...[12.678s] sort...[21.999s] count...[1.048s], 8000029665 points, 0 collisions, p=0.999030708688019; combined: 23999940341 points, 0 collisions, p=1 − 9.109089151127042e-10
 Pass 4/4: gen...[12.585s] sort...[21.952s] count...[1.050s], 8000059659 points, 0 collisions, p=0.9990307591204716; combined: 32000000000 points, 0 collisions, p=1 − 8.828901577425957e-13
-0	p=1 − 8.828901577425957e-13	combined: 0	p=1 − 8.828901577425957e-13
+0	p=1 − 8.828901577425957e-13
 Test completed in 146.49 seconds
 0	p=1 − 8.828901577425957e-13
 ```
@@ -172,8 +172,8 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional parallel collision test (20 CPUs, jump-ahead) on the upper 64 bits of the full 64-bit output (8000000000 points, 64-bit cells, 8000000000 memory locations, 59.807 GiB RAM, decimating 4 bits per dimension (~2⁴ candidate samples per kept sample))
 u: 64 t: 1 cells: 1152921504606846976 expected collisions: 27.755575547961804 (effective cells after decimation: 2⁶⁰)
-Pass 1/1: gen...[18.642s] sort...[26.335s] count...[1.048s], 7999985821 points, 0 collisions, p=1 − 8.829770712901635e-13; combined: 7999985821 points, 0 collisions, p=1 − 8.829770712901635e-13
-0	p=1 − 8.829770712901635e-13	combined: 0	p=1 − 8.829770712901635e-13
+Pass 1/1: gen...[18.642s] sort...[26.335s] count...[1.048s], 7999985821 points, 0 collisions, p=1 − 8.829770712901635e-13
+0	p=1 − 8.829770712901635e-13
 Test completed in 47.73 seconds
 0	p=1 − 8.829770712901635e-13
 ```
@@ -192,12 +192,12 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional parallel collision test (20 CPUs, jump-ahead) on the upper 64 bits of the full 64-bit output (8000000000 points, 64-bit cells, 8000000000 memory locations, 59.605 GiB RAM)
 u: 64 t: 1 cells: 18446744073709551616 expected collisions: 1.7347234755091947
-Pass 1/1: gen...[1.605s] sort...[24.610s] count...[1.048s], 8000000000 points, 0 collisions, p=0.8235510139931854; combined: 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.605s] sort...[24.610s] count...[1.048s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=0.8235510139931854
-Pass 1/1: gen...[1.609s] sort...[25.191s] count...[1.050s], 8000000000 points, 0 collisions, p=0.8235510139931854; combined: 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.609s] sort...[25.191s] count...[1.050s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=0.968865755337167
 [...]
-Pass 1/1: gen...[1.609s] sort...[26.398s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854; combined: 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.609s] sort...[26.398s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=1 − 8.828901494125378e-13
 Test completed in 465.96 seconds
 0	p=1 − 8.828901494125378e-13
@@ -226,7 +226,7 @@ Pass 1/8: gen...[13.200s] sort...[25.677s] count...[1.049s], 8000083095 points, 
 Pass 2/8: gen...[13.214s] sort...[21.772s] count...[1.047s], 8000011384 points, 20 collisions, p=0.07162240780462378; combined: 16000094479 points, 48 collisions, p=0.0003042040178853015
 [...]
 Pass 8/8: gen...[13.298s] sort...[22.828s] count...[1.049s], 8000119446 points, 22 collisions, p=0.026591939215130665; combined: 64000000000 points, 222 collisions, p=1.2959913978087028e-20
-222	p=1.2959913978087028e-20	combined: 222	p=1.2959913978087028e-20
+222	p=1.2959913978087028e-20
 Test completed in 298.37 seconds
 222	p=1.2959913978087028e-20
 ```
@@ -261,7 +261,7 @@ Pass 1/8: gen...[20.506s] sort...[26.332s] count...[1.050s], 8000076053 points, 
 Pass 2/8: gen...[20.129s] sort...[21.184s] count...[1.053s], 8000194725 points, 4 collisions, p=0.9980257653489827; combined: 16000270778 points, 7 collisions, p=1 − 2.9280185095831245e-6
 [...]
 Pass 8/8: gen...[19.392s] sort...[22.802s] count...[1.050s], 8000186794 points, 2 collisions, p=0.9998955967799726; combined: 64000000000 points, 16 collisions, p=1 − 1.804698905648335e-29
-16	p=1 − 1.804698905648335e-29	combined: 16	p=1 − 1.804698905648335e-29
+16	p=1 − 1.804698905648335e-29
 Test completed in 353.10 seconds
 16	p=1 − 1.804698905648335e-29
 ```
@@ -287,7 +287,7 @@ failures in statistical test is not easy due to the large state space. However,
 we can find bias using birthday spacings in a 64-bit MWC with 128 bits of state:
 
 ```text
-cargo run -r -F mwc_128_64_0xffebb71d94fcdaf9 36 3 2000000000 -B -P -b 6
+cargo run -r -F mwc_128_64_0xffebb71d94fcdaf9 -- 36 3 2000000000 -B -P -b 6
 Generator: MWC128 (0xffebb71d94fcdaf9)
 Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
@@ -299,7 +299,7 @@ Rep 1/1: 64 value intervals x 64 spacing classes
 [...]
  Class 64/64, interval 64/64: gen...[57.182s] sort...[13.009s] filter...[1.105s], 2000023578 points
  Class 64/64 done: [6064.541s], 2000055256 spacings, 2 collisions, p=0.00031330676200791153; combined: 65 collisions, p=8.595346190145383e-79
-[392078.211s] 65	p=8.595346190145383e-79	combined: 65	p=8.595346190145383e-79
+[392078.211s] 65	p=8.595346190145383e-79
 Test completed in 392079.89 seconds
 65	p=8.595346190145383e-79
 ```
