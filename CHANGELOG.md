@@ -1,5 +1,11 @@
 # Change Log
 
+## [0.2.3] - 2026-07-28
+
+### Changed
+
+- Changes to documentation.
+
 ## [0.2.2] - 2026-07-23
 
 ### Changed

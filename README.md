@@ -1,5 +1,13 @@
 # Large-scale collision and birthday-spacings tests for pseudorandom number generators
 
+[![crates.io](https://img.shields.io/crates/v/coll-birth.svg)](https://crates.io/crates/coll-birth)
+[![docs.rs](https://docs.rs/coll-birth/badge.svg)](https://docs.rs/coll-birth)
+[![rustc](https://img.shields.io/badge/rustc-1.85+-red.svg)](https://rust-lang.github.io/rfcs/2495-min-rust-version.html)
+[![CI](https://github.com/vigna/coll-birth-rs/actions/workflows/rust.yml/badge.svg)](https://github.com/vigna/coll-birth-rs/actions)
+![license](https://img.shields.io/crates/l/coll-birth)
+[![downloads](https://img.shields.io/crates/d/coll-birth)](https://crates.io/crates/coll-birth)
+[![coveralls](https://coveralls.io/repos/github/vigna/coll-birth-rs/badge.svg?branch=main)](https://coveralls.io/github/vigna/coll-birth-rs?branch=main)
+
 This crate implements two empirical tests for pseudorandom number generators
 (PRNGs), the _collision test_ and the _birthday-spacings test_. While such tests
 are implemented by batteries of tests such as [TestU01] (and, in fact, are very
@@ -301,9 +309,8 @@ the test in a naïve way would require at least a terabyte of RAM.
 
 # Acknowledgments
 
-I would like to thank the GitHub user `alvoskov` for a [very interesting
-discussion] that stimulated me to investigate space-time tradeoffs and publish
-this crate.
+I would like to thank [Alexey Voskov] for a [very interesting discussion] that
+stimulated me to investigate space-time tradeoffs and publish this crate.
 
 [`cdflib`]: https://crates.io/crates/cdflib
 [`prng`]: https://docs.rs/coll-birth/latest/coll_birth/prng/index.html
@@ -315,3 +322,4 @@ this crate.
 [their output is tightly coupled with that of a linear congruential generator with large prime modulus]: https://www.jstor.org/stable/2153884
 [_space-time tradeoffs_]: https://doi.org/10.1137/0220017
 [TestU01]: https://doi.org/10.1145/1268776.1268777
+[Alexey Voskov]: https://github.com/alvoskov
