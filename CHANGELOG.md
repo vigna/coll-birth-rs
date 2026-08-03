@@ -11,6 +11,10 @@
   generation is described, since sorting and counting use the Rayon pool either
   way.
 
+- Parallel runs now report the balls-into-bins headroom as a percentage after
+  the memory figure, as sequential runs already did. The allocation itself is
+  unchanged; it was simply not being reported.
+
 ## [0.2.3] - 2026-07-28
 
 ### Changed
