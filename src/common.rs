@@ -144,6 +144,20 @@ pub(crate) fn decimation_desc(d: usize, t: usize) -> String {
     )
 }
 
+/// How the header describes parallel generation.
+///
+/// `num_cpus` is the number of orbit segments actually used, which
+/// [`OrbitPartition::new`] clamps to the sample count. For a short scan, that
+/// is below the pool size, and the header should report the real fan-out.
+pub(crate) fn generation_desc(num_cpus: usize, split_desc: &str) -> String {
+    format!(
+        "using {} parallel generator{} ({})",
+        num_cpus,
+        if num_cpus == 1 { "" } else { "s" },
+        split_desc
+    )
+}
+
 /// Joins the per-mode descriptors into the header's trailing ", a, b" suffix (empty
 /// when there are none).
 pub(crate) fn join_mode_parts(parts: &[String]) -> String {
@@ -811,7 +825,7 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
     let mode_suffix = join_mode_parts(&mode_parts);
 
     eprintln!(
-        "Running a {}-dimensional {} test on the upper {} bits of the {} ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{}{})",
+        "Running a {}-dimensional {} test sequentially on the upper {} bits of the {} ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{}{})",
         args.t,
         test_type,
         args.u,

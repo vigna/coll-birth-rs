@@ -1,5 +1,16 @@
 # Change Log
 
+## [0.2.4] - 2026-08-03
+
+### Changed
+
+- The run header now states how the points were generated: “sequentially”, or
+  “using _k_ parallel generators (jump-ahead|pre-scan)” under `-P`. This
+  replaces the old “parallel <test> test (k CPUs, jump-ahead)” phrasing and
+  makes the effect of `RAYON_NUM_THREADS` visible in every mode's output. Only
+  generation is described, since sorting and counting use the Rayon pool either
+  way.
+
 ## [0.2.3] - 2026-07-28
 
 ### Changed
