@@ -158,6 +158,26 @@ pub(crate) fn generation_desc(num_cpus: usize, split_desc: &str) -> String {
     )
 }
 
+/// The " (+*N.NN*%)" note the header appends to its memory figure.
+///
+/// `capacity` is what one work unit allocates and `nominal` the load it would
+/// carry if the samples split perfectly across the 2^`partition_bits` bins, so
+/// the note reports what the balls-into-bins headroom of [`buffer_size`] adds on
+/// top. Empty when nothing partitions the samples (`partition_bits == 0`), where
+/// the buffer holds exactly the point count and there is no headroom to report.
+///
+/// `nominal` is an `f64` because the parallel birthday runner keeps two buffers
+/// of that load resident at once, and because `partition_bits` = *t*·*d* + *b*
+/// can exceed 63 through the decimation term: 2^`partition_bits` must be formed
+/// in floating point to avoid a shift overflow. This is a cosmetic header figure
+/// only.
+pub(crate) fn headroom_desc(capacity: usize, nominal: f64, partition_bits: usize) -> String {
+    if partition_bits == 0 {
+        return String::new();
+    }
+    format!(" (+{:.2}%)", (capacity as f64 / nominal - 1.0) * 100.0)
+}
+
 /// Joins the per-mode descriptors into the header's trailing ", a, b" suffix (empty
 /// when there are none).
 pub(crate) fn join_mode_parts(parts: &[String]) -> String {
@@ -801,15 +821,12 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         "collision"
     };
 
-    let headroom_suffix = if partition_bits > 0 {
-        // `partition_bits` = t·d + b can exceed 63 via the decimation term even
-        // though b < 64, so compute 2^partition_bits in floating point to avoid a
-        // shift overflow (this is a cosmetic header figure only).
-        let mean = (scan_len as f64) / 2.0f64.powi(partition_bits as i32);
-        format!(" (+{:.2}%)", (buf_len as f64 / mean - 1.0) * 100.0)
-    } else {
-        String::new()
-    };
+    // One buffer holds one bin of the sample scan.
+    let headroom_suffix = headroom_desc(
+        buf_len,
+        (scan_len as f64) / 2.0f64.powi(partition_bits as i32),
+        partition_bits,
+    );
 
     let mut mode_parts: Vec<String> = Vec::new();
     if tradeoff_b > 0 {

@@ -16,7 +16,7 @@ use crate::cli::Args;
 use crate::common::{
     GridParams, OrbitPartition, alloc_mmap, bin_overflow, bits_read_desc, buffer_size,
     count_adjacent_equals, decimation_desc, effective_cells_suffix, gen_unit_contiguous,
-    generation_desc, join_mode_parts, merge_into, scan_samples, test_lambda,
+    generation_desc, headroom_desc, join_mode_parts, merge_into, scan_samples, test_lambda,
 };
 use crate::prng::Prng;
 use crate::stats::{expected_collisions, format_p_value, p_value};
@@ -371,9 +371,17 @@ pub fn run_test_parallel<T: Cell>(
     let buf_len = |i: usize| buffer_size(chunk(i), partition_bits);
     let total_buf: usize = (0..num_cpus).map(buf_len).sum();
     let split_desc = partition.split_desc();
+    // One pass's buffers hold one bin of the sample scan, as in `run_test`; the
+    // headroom is larger here because each thread's sub-region is sized for its
+    // own chunk, and a smaller chunk needs proportionally more slack.
+    let headroom_suffix = headroom_desc(
+        total_buf,
+        (scan_total as f64) / 2.0f64.powi(partition_bits as i32),
+        partition_bits,
+    );
     eprintln!(
         "Running a {}-dimensional collision test {} on the upper {} bits of the {} \
-         ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{})",
+         ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{}{})",
         args.t,
         generation_desc(num_cpus, split_desc),
         args.u,
@@ -385,6 +393,7 @@ pub fn run_test_parallel<T: Cell>(
         // usize product (the allocation itself fails cleanly later, in
         // alloc_mmap), but the header should still print.
         total_buf as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
+        headroom_suffix,
         mode_suffix
     );
 

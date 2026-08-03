@@ -16,8 +16,8 @@ use crate::cell::Cell;
 use crate::cli::Args;
 use crate::common::{
     GridParams, OrbitPartition, alloc_mmap, bin_overflow, bits_read_desc, buffer_size,
-    count_adjacent_equals, decimation_desc, gen_unit_contiguous, generation_desc, join_mode_parts,
-    scan_samples, test_lambda,
+    count_adjacent_equals, decimation_desc, gen_unit_contiguous, generation_desc, headroom_desc,
+    join_mode_parts, scan_samples, test_lambda,
 };
 use crate::prng::Prng;
 use crate::stats::{format_p_value, p_value};
@@ -442,9 +442,18 @@ pub fn run_birthday_parallel<T: Cell>(
     // resident together within a repetition.
     let live_elems: usize = interval_cap + class_cap;
 
+    // Both resident buffers are sized for one bin of the sample scan: the interval
+    // buffer holds one value-interval's points, the class buffer one spacing
+    // class accumulated over every interval. The nominal load is therefore twice
+    // the bin mean, and the note reports the headroom over that.
+    let headroom_suffix = headroom_desc(
+        live_elems,
+        2.0 * (scan_total as f64) / 2.0f64.powi(partition_bits as i32),
+        partition_bits,
+    );
     eprintln!(
         "Running a {t}-dimensional birthday-spacings test {} on the upper {} bits of the {} \
-         ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{})",
+         ({} points, {}-bit cells, {} memory locations, {:.3} GiB RAM{}{})",
         generation_desc(num_cpus, split_desc),
         args.u,
         output_type,
@@ -455,6 +464,7 @@ pub fn run_birthday_parallel<T: Cell>(
         // usize product (the allocation itself fails cleanly later, in
         // alloc_mmap), but the header should still print.
         live_elems as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
+        headroom_suffix,
         mode_suffix
     );
     eprintln!(
