@@ -20,7 +20,7 @@ use num::traits::ToPrimitive;
 use coll_birth::birthday::run_birthday_parallel;
 use coll_birth::cli::Args;
 use coll_birth::collision::run_test_parallel;
-use coll_birth::common::{compute_lambda_and_points, run_test, test_lambda};
+use coll_birth::common::{compute_lambda_and_points, run_test, test_null};
 
 fn make_args(u: usize, t: usize, m: usize, tradeoff: Option<usize>, seed: u64) -> Args {
     Args {
@@ -77,11 +77,11 @@ fn test_single_pass_collision_sum_matches_full() {
     // The per-pass nominal lambda shares (lambda_total / 2ᵇ) sum back to the
     // full lambda exactly (power-of-two divisor → exact in f64).
     let num_passes = 1u64 << b;
-    let lambda_k = test_lambda(points, cells.to_f64().unwrap(), false) / num_passes as f64;
+    let lambda_k = test_null(points, cells.to_f64().unwrap(), false) / num_passes as f64;
     assert_eq!(
         num_passes as f64 * lambda_k,
-        test_lambda(points, cells.to_f64().unwrap(), false),
-        "single-pass lambda shares must sum to the full lambda"
+        test_null(points, cells.to_f64().unwrap(), false),
+        "single-pass null shares must sum to the full null distribution"
     );
 }
 

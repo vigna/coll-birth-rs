@@ -26,7 +26,11 @@ pub struct Args {
     /// Number of memory locations: the number of points is m · 2ᵇ (approximate
     /// when decimating), the number of samples is m · 2ᵇ · 2ᵗᵈ, and the number
     /// of calls to the generator is t · m · (2ᵇ)² · 2ᵗᵈ (the birthday-spacings
-    /// test adds a further factor of 2ᵇ for its second level).​
+    /// test adds a further factor of 2ᵇ for its second level); if omitted (not
+    /// allowed when decimating), the number of points is ⌊1.256431 · k⌋ for the
+    /// collision test on k cells (the density maximizing the variance of the
+    /// number of collisions), and ⌊k⁵ᐟ¹² / (2r)¹ᐟ³⌋ for the birthday-spacings
+    /// test with r repetitions (TestU01).​
     pub m: Option<usize>,
 
     /// Left-shift the PRNG output by this many bits before extracting cell indices.​

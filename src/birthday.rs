@@ -17,10 +17,10 @@ use crate::cli::Args;
 use crate::common::{
     GridParams, OrbitPartition, alloc_mmap, bin_overflow, bits_read_desc, buffer_size,
     count_adjacent_equals, decimation_desc, gen_unit_contiguous, generation_desc, headroom_desc,
-    join_mode_parts, scan_samples, test_lambda,
+    join_mode_parts, scan_samples, test_null,
 };
 use crate::prng::Prng;
-use crate::stats::{format_p_value, p_value};
+use crate::stats::{Null, format_p_value, p_value};
 use crate::util::{Stopwatch, parallelism};
 
 /// Runs a birthday-spacings test.
@@ -199,8 +199,8 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     // 2ᵇ value-intervals, so without this the run is silent for the whole sweep.
     let mut class_sw = Stopwatch::new();
     let cells_f64 = params.cells.to_f64().unwrap();
-    // Nominal per-class Poisson mean (lambda_total / 2ᵇ) for the progress p-values.
-    let lambda_class = (points as f64).powi(3) / (4.0 * cells_f64) / num_passes as f64;
+    // Nominal per-class Poisson mean (null_total / 2ᵇ) for the progress p-values.
+    let null_class = Null::poisson((points as f64).powi(3) / (4.0 * cells_f64) / num_passes as f64);
 
     for j in pass_lo..pass_hi {
         let class_target = T::from_u64(j);
@@ -311,14 +311,14 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
         total_coll += class_coll;
         let classes_done = (j - pass_lo + 1) as f64;
         let elapsed = class_sw.lap();
-        let class_p = format_p_value(p_value(class_coll as f64, lambda_class), pretty_p);
+        let class_p = format_p_value(p_value(class_coll as f64, null_class), pretty_p);
         if multi_pass {
             eprintln!(
                 "  Class {}/{} done: [{elapsed:.3}s], {class_len} spacings, {class_coll} collisions, p={class_p}; combined: {total_coll} collisions, p={}",
                 j + 1,
                 num_passes,
                 format_p_value(
-                    p_value(total_coll as f64, classes_done * lambda_class),
+                    p_value(total_coll as f64, classes_done * null_class),
                     pretty_p
                 ),
             );
@@ -376,7 +376,7 @@ pub fn run_birthday_parallel<T: Cell>(
     cells: &BigUint,
     lambda: f64,
     num_cpus: usize,
-) -> (u128, f64) {
+) -> (u128, Null) {
     let seed = args.seed;
     eprintln!("Seed: {:#018x}", seed);
 
@@ -474,7 +474,7 @@ pub fn run_birthday_parallel<T: Cell>(
 
     let mut sw = Stopwatch::new();
     let mut tot: u128 = 0;
-    let mut lambda_sum = 0.0f64;
+    let mut null_sum = Null::ZERO;
     let cells_f64 = cells.to_f64().unwrap();
 
     for rep in 1..=args.reps {
@@ -504,9 +504,9 @@ pub fn run_birthday_parallel<T: Cell>(
         // Per-class progress heartbeat (collision-style): each spacing-class sweeps
         // all 2ᵇ value-intervals, so without this the rep is silent for hours.
         let mut class_sw = Stopwatch::new();
-        // Nominal per-class Poisson mean (lambda_total / 2ᵇ) for the progress
+        // Nominal per-class Poisson mean (null_total / 2ᵇ) for the progress
         // p-values; the final rep line below conditions on the actual kept count.
-        let lambda_class = test_lambda(points, cells_f64, true) / num_passes as f64;
+        let null_class = test_null(points, cells_f64, true) / num_passes as f64;
 
         for j in pass_lo..pass_hi {
             let class_target = T::from_u64(j);
@@ -642,14 +642,14 @@ pub fn run_birthday_parallel<T: Cell>(
             rep_coll += class_coll;
             let classes_done = (j - pass_lo + 1) as f64;
             let elapsed = class_sw.lap();
-            let class_p = format_p_value(p_value(class_coll as f64, lambda_class), args.pretty_p);
+            let class_p = format_p_value(p_value(class_coll as f64, null_class), args.pretty_p);
             if multi_pass {
                 eprintln!(
                     "  Class {}/{} done: [{elapsed:.3}s], {class_len} spacings, {class_coll} collisions, p={class_p}; combined: {rep_coll} collisions, p={}",
                     j + 1,
                     num_passes,
                     format_p_value(
-                        p_value(rep_coll as f64, classes_done * lambda_class),
+                        p_value(rep_coll as f64, classes_done * null_class),
                         args.pretty_p
                     ),
                 );
@@ -664,8 +664,8 @@ pub fn run_birthday_parallel<T: Cell>(
 
         tot += rep_coll as u128;
         // Condition the per-rep Poisson mean on the points actually kept.
-        let lambda_rep = test_lambda(rep_points, cells_f64, true);
-        lambda_sum += lambda_rep;
+        let null_rep = test_null(rep_points, cells_f64, true);
+        null_sum += null_rep;
         let elapsed = psw.lap();
         if args.pass.is_some() {
             // Single-pass mode: `rep_coll` is one spacing-class's count (mean
@@ -678,11 +678,11 @@ pub fn run_birthday_parallel<T: Cell>(
                 eprintln!("[{elapsed:.3}s] {rep_coll}");
             }
         } else {
-            let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
+            let rep_p = format_p_value(p_value(rep_coll as f64, null_rep), args.pretty_p);
             if args.reps > 1 {
                 eprintln!(
                     "[{elapsed:.3}s] {rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
-                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                    format_p_value(p_value(tot as f64, null_sum), args.pretty_p)
                 );
             } else {
                 eprintln!("[{elapsed:.3}s] {rep_coll}\tp={rep_p}");
@@ -690,7 +690,7 @@ pub fn run_birthday_parallel<T: Cell>(
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());
-    (tot, lambda_sum)
+    (tot, null_sum)
 }
 
 // Direct tests of the wrap-around arithmetic in compute_spacings at the

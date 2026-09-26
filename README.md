@@ -66,9 +66,17 @@ the memory figure, while in plain mode it is exactly _m_.
 
 The driver generates points from the selected PRNG, then sorts the resulting
 cell indices and either counts collisions or measures the distribution of
-birthday spacings. _p_-values are computed against a Poisson reference via
-[`cdflib`], with the mean conditioned on the number of points actually kept
-(relevant under decimation, where the kept count is random).
+birthday spacings. _p_-values are computed via [`cdflib`] against a Poisson
+reference or, for collision tests in which the variance of the number of
+collisions is smaller than its mean by more than 1% (that is, whose density,
+points over cells, exceeds ≈ 0.0075), against a normal reference with the exact
+mean and variance. This is a stricter criterion than TestU01's, which uses the
+Poisson approximation up to density 1.0001: at density 1 the Poisson variance is
+almost four times the true one, and _p_-values cluster around 1/2. In both cases
+the null distribution is conditioned on the number of points actually kept
+(relevant under decimation, where the kept count is random). The density of a
+collision test is by default ≈ 1.256431, the value that maximizes the variance
+of the number of collisions, and it can be at most 1.26.
 
 If multiple cores are available, an option can make the generation of the output
 happen in parallel: the part of the orbit that needs to be generated is split

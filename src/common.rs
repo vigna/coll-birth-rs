@@ -18,7 +18,7 @@ use crate::cell::{Cell, cell_index, decimate_once};
 use crate::cli::Args;
 use crate::collision::{run_collision, run_collision_decimate, run_collision_tradeoff};
 use crate::prng::Prng;
-use crate::stats::{expected_collisions, format_p_value, p_value};
+use crate::stats::{MAX_DENSITY, Null, VARIANCE_MAXIMIZING_DENSITY, format_p_value, p_value};
 use crate::util::{Stopwatch, parallelism, superscript};
 
 /// Allocates an mmap-backed slice and eagerly faults it as transparent huge pages.
@@ -690,23 +690,40 @@ fn gen_pass_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL
     (len, local)
 }
 
-/// Poisson mean of a test that examined `points` points on `cells` cells:
-/// [`expected_collisions`] for the collision test, points³/(4 · cells) for
+/// The header note describing the null distribution of a collision test with
+/// `points` points on `cells` cells: empty in the sparse (Poisson) regime,
+/// otherwise the variance of the normal approximation.
+pub(crate) fn null_desc(points: usize, cells: f64) -> String {
+    let null = Null::collisions(points as f64, cells);
+    if null.normal {
+        format!(" (normal approximation, variance: {})", null.var)
+    } else {
+        String::new()
+    }
+}
+
+/// Null distribution of the count of a test that examined `points` points on
+/// `cells` cells: [`Null::collisions`] for the collision test (Poisson, or
+/// normal when the variance-to-mean ratio falls below
+/// [`VARIANCE_RATIO_LIMIT`]), Poisson with mean points³/(4 · cells) for
 /// birthday spacings. Used both a priori (nominal point count, for the header
 /// line and the default sizing) and per repetition, conditioned on the points
 /// actually kept, identical to the a-priori value except under decimation,
 /// where the kept count is random and conditioning avoids overdispersing the
 /// null distribution.
-pub fn test_lambda(points: usize, cells: f64, birthday_spacings: bool) -> f64 {
+///
+/// [`VARIANCE_RATIO_LIMIT`]: crate::stats::VARIANCE_RATIO_LIMIT
+pub fn test_null(points: usize, cells: f64, birthday_spacings: bool) -> Null {
     if birthday_spacings {
         // TestU01 long guide: lambda = n³ / (4k).
-        BigUint::from(points).pow(3).to_f64().unwrap() / (cells * 4.0)
+        Null::poisson(BigUint::from(points).pow(3).to_f64().unwrap() / (cells * 4.0))
     } else {
-        expected_collisions(points as f64, cells)
+        Null::collisions(points as f64, cells)
     }
 }
 
-/// Computes the Poisson mean and the point count to use, applying the test-specific defaults.
+/// Computes the expected count (the mean of the null distribution) and the point
+/// count to use, applying the test-specific defaults.
 pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
     // cells is already the effective cell count: main() computes it as
     // (2ᵘ⁻ᵈ)ᵗ, incorporating any whole-tuple decimation.
@@ -723,7 +740,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
     };
 
     let points;
-    let lambda = if args.birthday_spacings {
+    let null = if args.birthday_spacings {
         // TestU01 long guide p. 133: choose points to maximise birthday-spacings power.
         let max_points = (effective_cells_f64.powf(5.0 / 12.0)
             / (2.0 * args.reps as f64).powf(1.0 / 3.0)) as usize;
@@ -740,24 +757,34 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
                  (omit -m to use the maximum)",
             );
         }
-        test_lambda(points, effective_cells_f64, true)
+        test_null(points, effective_cells_f64, true)
     } else {
-        // Cap the default m so that m · 2ᵇ always fits a usize; an explicit,
-        // too-large m still fails the checked multiplication below, but as a
-        // clean CLI error rather than a panic.
-        let m_default = (cells.clone() / pass_factor)
-            .min((usize::MAX / pass_factor).into())
-            .to_usize()
-            .unwrap();
+        // The default number of points is ⌊VARIANCE_MAXIMIZING_DENSITY · cells⌋,
+        // split across the 2ᵇ passes. Cap the default m so that m · 2ᵇ always
+        // fits a usize; an explicit, too-large m still fails the checked
+        // multiplication below, but as a clean CLI error rather than a panic.
+        let m_cap = usize::MAX / pass_factor;
+        let m_max_var =
+            (VARIANCE_MAXIMIZING_DENSITY * effective_cells_f64 / pass_factor as f64).floor();
+        let m_default = if m_max_var >= m_cap as f64 {
+            m_cap
+        } else {
+            m_max_var as usize
+        };
         let m = args.m.unwrap_or(m_default);
         points = m.checked_mul(pass_factor).unwrap_or_else(|| {
             Args::die("the number of points m · 2ᵇ overflows the address space (reduce m or b)")
         });
 
-        if BigUint::from(points) > *cells {
+        // In the dense regime the count is approximated by a normal
+        // distribution (see VARIANCE_RATIO_LIMIT); we allow densities up to MAX_DENSITY,
+        // just above the density ≈ 1.256431 that maximizes the variance of the
+        // number of collisions (the root of e^α = 1 + 2α).
+        if points as f64 > MAX_DENSITY * effective_cells_f64 {
             Args::die(&format!(
-                "more points ({}) than {}cells ({})",
+                "more points ({}) than {} times the number of {}cells ({})",
                 points,
+                MAX_DENSITY,
                 if args.decimation_bits.is_some() {
                     "effective "
                 } else {
@@ -766,7 +793,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
                 cells
             ));
         }
-        test_lambda(points, effective_cells_f64, false)
+        test_null(points, effective_cells_f64, false)
     };
 
     if points < 10000 {
@@ -775,7 +802,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
         ));
     }
 
-    (lambda, points)
+    (null.mean, points)
 }
 
 /// Runs the test sequentially, dispatching the hot loop's const generics once per
@@ -792,7 +819,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
 /// (identical to `lambda * reps` when not decimating).
 ///
 /// [`cell_index`]: crate::cell::cell_index
-pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f64) -> (u128, f64) {
+pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f64) -> (u128, Null) {
     let seed = args.seed;
     eprintln!("Seed: {:#018x}", seed);
 
@@ -860,8 +887,17 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
 
     let cells_suffix = effective_cells_suffix(d, args.u, args.t);
     eprintln!(
-        "u: {} t: {} cells: {:.0} expected collisions: {}{}",
-        args.u, args.t, cells, lambda, cells_suffix
+        "u: {} t: {} cells: {:.0} expected collisions: {}{}{}",
+        args.u,
+        args.t,
+        cells,
+        lambda,
+        if args.birthday_spacings {
+            String::new()
+        } else {
+            null_desc(points, cells.to_f64().unwrap())
+        },
+        cells_suffix
     );
 
     let mut mapped = alloc_mmap::<T>(buf_len);
@@ -883,7 +919,7 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
 
     let mut sw = Stopwatch::new();
     let mut tot: u128 = 0;
-    let mut lambda_sum = 0.0f64;
+    let mut null_sum = Null::ZERO;
     for _rep in 1..=args.reps {
         // go!(DIM) expands the FULL/DECIMATE/mode matrix for one DIM literal;
         // the outer match picks DIM (0 = runtime fallback).
@@ -1016,8 +1052,8 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         // Condition the Poisson mean on the points actually examined: identical
         // to the a-priori lambda except under decimation, where the kept count
         // is random and conditioning avoids overdispersion.
-        let lambda_rep = test_lambda(used, effective_cells_f64, args.birthday_spacings);
-        lambda_sum += lambda_rep;
+        let null_rep = test_null(used, effective_cells_f64, args.birthday_spacings);
+        null_sum += null_rep;
         if args.pass.is_some() {
             // Single-pass mode: `used` is one unit's share of the points, so a
             // Poisson mean conditioned on it does not match the unit's count
@@ -1029,11 +1065,11 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
                 eprintln!("{c}");
             }
         } else {
-            let rep_p = format_p_value(p_value(c as f64, lambda_rep), args.pretty_p);
+            let rep_p = format_p_value(p_value(c as f64, null_rep), args.pretty_p);
             if args.reps > 1 {
                 eprintln!(
                     "{c}\tp={rep_p}\tcombined: {tot}\tp={}",
-                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                    format_p_value(p_value(tot as f64, null_sum), args.pretty_p)
                 );
             } else {
                 eprintln!("{c}\tp={rep_p}");
@@ -1041,7 +1077,7 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());
-    (tot, lambda_sum)
+    (tot, null_sum)
 }
 
 #[cfg(all(test, feature = "incr"))]

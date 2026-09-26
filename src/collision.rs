@@ -16,10 +16,11 @@ use crate::cli::Args;
 use crate::common::{
     GridParams, OrbitPartition, alloc_mmap, bin_overflow, bits_read_desc, buffer_size,
     count_adjacent_equals, decimation_desc, effective_cells_suffix, gen_unit_contiguous,
-    generation_desc, headroom_desc, join_mode_parts, merge_into, scan_samples, test_lambda,
+    generation_desc, headroom_desc, join_mode_parts, merge_into, null_desc, scan_samples,
+    test_null,
 };
 use crate::prng::Prng;
-use crate::stats::{expected_collisions, format_p_value, p_value};
+use crate::stats::{Null, format_p_value, p_value};
 use crate::util::Stopwatch;
 
 /// Runs a collision test.
@@ -155,17 +156,16 @@ pub fn run_collision_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool>(
         eprint!("[{:.3}s] count...", sw.lap());
 
         let c = count_adjacent_equals(slice);
-        let lambda_pass = expected_collisions(len as f64, cells_per_pass);
+        let null_pass = Null::collisions(len as f64, cells_per_pass);
         total_coll += c;
         total_len += len;
         let elapsed = sw.lap();
-        let local_p = format_p_value(p_value(c as f64, lambda_pass), pretty_p);
+        let local_p = format_p_value(p_value(c as f64, null_pass), pretty_p);
         if multi_pass {
-            let lambda_so_far =
-                expected_collisions(total_len as f64, (k + 1) as f64 * cells_per_pass);
+            let null_so_far = Null::collisions(total_len as f64, (k + 1) as f64 * cells_per_pass);
             eprintln!(
                 "[{elapsed:1.3}s], {len} points, {c} collisions, p={local_p}; combined: {total_len} points, {total_coll} collisions, p={}",
-                format_p_value(p_value(total_coll as f64, lambda_so_far), pretty_p)
+                format_p_value(p_value(total_coll as f64, null_so_far), pretty_p)
             );
         } else {
             eprintln!("[{elapsed:1.3}s], {len} points, {c} collisions, p={local_p}");
@@ -283,12 +283,12 @@ pub fn run_collision_decimate<T: Cell, const DIM: usize, const FULL: bool>(
         eprint!("[{:.3}s] count...", sw.lap());
 
         c = count_adjacent_equals(&buf[..len]);
-        let lambda = expected_collisions(len as f64, effective_cells);
+        let null = Null::collisions(len as f64, effective_cells);
         eprintln!(
             "[{:.3}s], {len} points, {} collisions\tp={}",
             sw.lap(),
             c,
-            format_p_value(p_value(c as f64, lambda), pretty_p)
+            format_p_value(p_value(c as f64, null), pretty_p)
         );
     }
     (c, len)
@@ -332,7 +332,7 @@ pub fn run_test_parallel<T: Cell>(
     cells: &BigUint,
     lambda: f64,
     num_cpus: usize,
-) -> (u128, f64) {
+) -> (u128, Null) {
     let seed = args.seed;
     eprintln!("Seed: {:#018x}", seed);
 
@@ -399,8 +399,13 @@ pub fn run_test_parallel<T: Cell>(
 
     let cells_suffix = effective_cells_suffix(d, args.u, args.t);
     eprintln!(
-        "u: {} t: {} cells: {:.0} expected collisions: {}{}",
-        args.u, args.t, cells, lambda, cells_suffix
+        "u: {} t: {} cells: {:.0} expected collisions: {}{}{}",
+        args.u,
+        args.t,
+        cells,
+        lambda,
+        null_desc(points, cells.to_f64().unwrap()),
+        cells_suffix
     );
 
     let full = args.u == 64 && args.s == 0;
@@ -415,7 +420,7 @@ pub fn run_test_parallel<T: Cell>(
 
     let mut sw = Stopwatch::new();
     let mut tot: u128 = 0;
-    let mut lambda_sum = 0.0f64;
+    let mut null_sum = Null::ZERO;
     let cells_f64 = cells.to_f64().unwrap();
     // Cells covered by a single tradeoff pass (the whole space when no tradeoff),
     // needed for the per-pass Poisson means.
@@ -500,29 +505,29 @@ pub fn run_test_parallel<T: Cell>(
                 eprint!("[{:.3}s] count...", psw.lap());
 
                 c = count_adjacent_equals(&acc_slice[..acc_len]);
-                let lambda_cp = expected_collisions(acc_len as f64, effective_cells_f64);
+                let null_cp = Null::collisions(acc_len as f64, effective_cells_f64);
                 eprintln!(
                     "[{:.3}s], {acc_len} points, {c} collisions\tp={}",
                     psw.lap(),
-                    format_p_value(p_value(c as f64, lambda_cp), args.pretty_p),
+                    format_p_value(p_value(c as f64, null_cp), args.pretty_p),
                 );
             }
             tot += c as u128;
             // Condition the per-rep Poisson mean on the points actually kept.
-            let lambda_rep = test_lambda(acc_len, effective_cells_f64, false);
-            lambda_sum += lambda_rep;
-            let rep_p = format_p_value(p_value(c as f64, lambda_rep), args.pretty_p);
+            let null_rep = test_null(acc_len, effective_cells_f64, false);
+            null_sum += null_rep;
+            let rep_p = format_p_value(p_value(c as f64, null_rep), args.pretty_p);
             if args.reps > 1 {
                 eprintln!(
                     "{c}\tp={rep_p}\tcombined: {tot}\tp={}",
-                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                    format_p_value(p_value(tot as f64, null_sum), args.pretty_p)
                 );
             } else {
                 eprintln!("{c}\tp={rep_p}");
             }
         }
         eprintln!("Test completed in {:.2} seconds", sw.lap());
-        return (tot, lambda_sum);
+        return (tot, null_sum);
     }
 
     // Per-thread sub-region capacities of the one big buffer; their prefix sums
@@ -579,15 +584,15 @@ pub fn run_test_parallel<T: Cell>(
             // sequential run_collision_tradeoff per-pass line.
             total_points += pass_points;
             rep_coll += c;
-            let lambda_pass = expected_collisions(pass_points as f64, cells_per_pass);
+            let null_pass = Null::collisions(pass_points as f64, cells_per_pass);
             let elapsed = psw.lap();
-            let local_p = format_p_value(p_value(c as f64, lambda_pass), args.pretty_p);
+            let local_p = format_p_value(p_value(c as f64, null_pass), args.pretty_p);
             if multi_pass {
-                let lambda_so_far =
-                    expected_collisions(total_points as f64, (pass + 1) as f64 * cells_per_pass);
+                let null_so_far =
+                    Null::collisions(total_points as f64, (pass + 1) as f64 * cells_per_pass);
                 eprintln!(
                     "[{elapsed:1.3}s], {pass_points} points, {c} collisions, p={local_p}; combined: {total_points} points, {rep_coll} collisions, p={}",
-                    format_p_value(p_value(rep_coll as f64, lambda_so_far), args.pretty_p),
+                    format_p_value(p_value(rep_coll as f64, null_so_far), args.pretty_p),
                 );
             } else {
                 eprintln!("[{elapsed:1.3}s], {pass_points} points, {c} collisions, p={local_p}");
@@ -596,8 +601,8 @@ pub fn run_test_parallel<T: Cell>(
 
         tot += rep_coll as u128;
         // Condition the per-rep Poisson mean on the points actually kept.
-        let lambda_rep = test_lambda(total_points, cells_f64, false);
-        lambda_sum += lambda_rep;
+        let null_rep = test_null(total_points, cells_f64, false);
+        null_sum += null_rep;
         if args.pass.is_some() {
             // Single-pass mode: `total_points` is one value-interval's share, so
             // a Poisson mean conditioned on it does not match the interval's
@@ -609,11 +614,11 @@ pub fn run_test_parallel<T: Cell>(
                 eprintln!("{rep_coll}");
             }
         } else {
-            let rep_p = format_p_value(p_value(rep_coll as f64, lambda_rep), args.pretty_p);
+            let rep_p = format_p_value(p_value(rep_coll as f64, null_rep), args.pretty_p);
             if args.reps > 1 {
                 eprintln!(
                     "{rep_coll}\tp={rep_p}\tcombined: {tot}\tp={}",
-                    format_p_value(p_value(tot as f64, lambda_sum), args.pretty_p)
+                    format_p_value(p_value(tot as f64, null_sum), args.pretty_p)
                 );
             } else {
                 eprintln!("{rep_coll}\tp={rep_p}");
@@ -621,5 +626,5 @@ pub fn run_test_parallel<T: Cell>(
         }
     }
     eprintln!("Test completed in {:.2} seconds", sw.lap());
-    (tot, lambda_sum)
+    (tot, null_sum)
 }

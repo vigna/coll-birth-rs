@@ -13,7 +13,7 @@ use num::traits::ToPrimitive;
 use coll_birth::birthday::run_birthday_parallel;
 use coll_birth::cli::Args;
 use coll_birth::collision::run_test_parallel;
-use coll_birth::common::{compute_lambda_and_points, run_test, test_lambda};
+use coll_birth::common::{compute_lambda_and_points, run_test, test_null};
 use coll_birth::prng::Prng;
 use coll_birth::stats::{format_p_value, p_value};
 
@@ -63,7 +63,7 @@ fn main() {
 
     let (lambda, points) = compute_lambda_and_points(&args, &cells);
 
-    let (tot, lambda_total) = if let Some(num_cpus) = args.parallel_cpus() {
+    let (tot, null_total) = if let Some(num_cpus) = args.parallel_cpus() {
         if args.birthday_spacings {
             dispatch(
                 &cells,
@@ -90,23 +90,31 @@ fn main() {
 
     if let Some(k) = args.pass {
         // Single-pass mode (--pass): emit this unit's raw count and its nominal
-        // lambda share (lambda_total / 2ᵇ, summed over repetitions).
+        // share of the null distribution (1 / 2ᵇ of the mean and, in the dense
+        // normal regime, of the variance, summed over repetitions).
         let num_passes = 1u64 << args.tradeoff_bits();
-        let lambda_k = args.reps as f64
-            * test_lambda(points, cells.to_f64().unwrap(), args.birthday_spacings)
+        let null_k = args.reps as f64
+            * test_null(points, cells.to_f64().unwrap(), args.birthday_spacings)
             / num_passes as f64;
-        eprintln!(
-            "Single pass {k} of {num_passes}: recombine the 2ᵇ runs via p_value(Σ counts, Σ lambdas)"
-        );
-        println!("{tot}\tlambda={lambda_k}");
+        if null_k.normal {
+            eprintln!(
+                "Single pass {k} of {num_passes}: recombine the 2ᵇ runs via a normal p-value with mean Σ lambdas and variance Σ vars"
+            );
+            println!("{tot}\tlambda={}\tvar={}", null_k.mean, null_k.var);
+        } else {
+            eprintln!(
+                "Single pass {k} of {num_passes}: recombine the 2ᵇ runs via p_value(Σ counts, Σ lambdas)"
+            );
+            println!("{tot}\tlambda={}", null_k.mean);
+        }
     } else {
-        // lambda_total is the sum of the per-repetition means, each conditioned on
-        // the points that repetition actually kept (= lambda · reps when not
-        // decimating).
+        // null_total is the sum of the per-repetition null distributions, each
+        // conditioned on the points that repetition actually kept (= reps times
+        // the nominal one when not decimating).
         println!(
             "{}\tp={}",
             tot,
-            format_p_value(p_value(tot as f64, lambda_total), args.pretty_p)
+            format_p_value(p_value(tot as f64, null_total), args.pretty_p)
         );
     }
 }
