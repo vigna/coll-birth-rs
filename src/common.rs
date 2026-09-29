@@ -319,6 +319,9 @@ pub(crate) struct OrbitPartition {
 
 impl OrbitPartition {
     pub(crate) fn new(seed: u64, num_cpus: usize, scan_total: usize, t: usize) -> Self {
+        // The prng module requires try_skip to either succeed for every offset
+        // or fail for every offset, so probing with 0 decides skip capability
+        // for all the offsets used below.
         let skip_capable = {
             let mut probe = Prng::new(seed);
             probe.try_skip(0).is_ok()
@@ -370,7 +373,10 @@ impl OrbitPartition {
                         .checked_mul(self.t as u64)
                         .expect("orbit offset overflows u64");
                     let mut p = Prng::new(self.seed);
-                    p.try_skip(off).unwrap();
+                    p.try_skip(off).expect(
+                        "try_skip(0) succeeded but try_skip(n) failed: try_skip must \
+                         either succeed or fail for every offset",
+                    );
                     p
                 })
                 .collect()

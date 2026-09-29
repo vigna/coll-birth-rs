@@ -220,7 +220,9 @@ Test completed in 465.96 seconds
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding
 implementation in the [`prng`] module. If skipping is possible, you can
-implement the `try_skip` method.
+implement the `try_skip` method; it must either succeed for every offset
+(including 0) or fail for every offset, as the parallel runners probe the
+capability with `try_skip(0)` (see the [`prng`] module documentation).
 
 # Example: WyRand
 
