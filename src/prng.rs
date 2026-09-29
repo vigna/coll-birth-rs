@@ -694,7 +694,7 @@ macro_rules! lcg64 {
     };
 }
 
-// f₂ = 0.977689
+// f₂ = 0.977689 (figure of merit in two dimensions)
 #[cfg(feature = "lcg_64_64_0xa5b9ee81534fa94d")]
 lcg64!(0xa5b9ee81534fa94d);
 

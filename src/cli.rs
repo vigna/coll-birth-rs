@@ -82,8 +82,9 @@ pub struct Args {
     pub parallel: bool,
 
     /// Run only one of the 2ᵇ tradeoff units (0-based) and print its raw count and
-    /// its λ share, so the 2ᵇ units can be distributed across invocations and
-    /// recombined; collision: value-interval K; birthday: spacing-class K; requires -b.​
+    /// its λ share (and, in the dense normal regime, its variance share), so the
+    /// 2ᵇ units can be distributed across invocations and recombined; collision:
+    /// value-interval K; birthday: spacing-class K; requires -b.​
     #[arg(long, value_name = "K")]
     pub pass: Option<u64>,
 }

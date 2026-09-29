@@ -1,8 +1,35 @@
 # Change Log
 
-## [0.2.4] - 2026-08-03
+## [0.3.0] - 2026-09-29
+
+### New
+
+- Collision tests whose number of collisions has a variance smaller than its
+  mean by more than 1% (density above ≈ 0.0075) now compute _p_-values against
+  a normal distribution with the exact mean and variance of the occupancy
+  problem, rather than against a Poisson distribution. The run header appends
+  `(normal approximation, variance: …)` in this regime.
+
+- Collision tests now accept densities up to 1.26 (it was 1).
+
+- In the dense regime, `--pass` also prints the unit's variance share as a
+  third `var=` column; the units are then recombined with a normal _p_-value
+  whose mean and variance are the sums of the shares.
 
 ### Changed
+
+- When `m` is omitted, the collision test now uses ⌊1.256431 · _k_⌋ points on
+  _k_ cells (the density maximizing the variance of the number of collisions)
+  instead of _k_ points.
+
+- The library API now describes null distributions with the `Null` type:
+  `stats::p_value` takes a `Null` instead of a Poisson mean,
+  `common::test_lambda` has been replaced by `common::test_null`, and the test
+  runners return a `Null` instead of a summed Poisson mean.
+
+- The `prng` module documents the `try_skip` contract: it must succeed for
+  every offset or fail for every offset, as the parallel runners probe the
+  capability with `try_skip(0)`.
 
 - The run header now states how the points were generated: “sequentially”, or
   “using _k_ parallel generators (jump-ahead|pre-scan)” under `-P`. This
@@ -14,6 +41,13 @@
 - Parallel runs now report the balls-into-bins headroom as a percentage after
   the memory figure, as sequential runs already did. The allocation itself is
   unchanged; it was simply not being reported.
+
+### Fixed
+
+- Collision tests at densities close to 1 were judged against a Poisson
+  distribution whose variance is almost four times the true one (as happens in
+  TestU01), so their _p_-values clustered around 1/2 and they hardly ever
+  rejected.
 
 ## [0.2.3] - 2026-07-28
 
