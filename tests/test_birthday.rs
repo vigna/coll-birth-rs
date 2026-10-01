@@ -4,8 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Integration tests for the birthday-spacings runners' public API. Gated to
-//! splitmix for the same buffer-uniformity reason as the collision tests.
+//! Tests of the birthday-spacings runners.
+//!
+//! Buffers are sized assuming that points are spread evenly among bins, so the
+//! tests run only with splitmix.
 #![cfg(feature = "splitmix")]
 
 use num::BigUint;
@@ -24,8 +26,7 @@ fn grid(u: usize, t: usize, d: usize, cells: &BigUint) -> GridParams<'_> {
     }
 }
 
-// The two-level birthday tradeoff visits the same point multiset as a single
-// sweep, so its summed per-class spacing-collision count equals plain birthday.
+// The tradeoff must give the same result as the plain test.
 #[test]
 fn test_birthday_tradeoff_matches_plain_no_decimation() {
     let (u, t, b, d) = (8usize, 2usize, 4usize, 0usize);
@@ -55,9 +56,8 @@ fn test_birthday_tradeoff_matches_plain_no_decimation() {
     );
 }
 
-// The wrap-around is computed via cells − 1, so an N-bit type works even when
-// cells == 2^N exactly (no strictly-wider type needed). At the 2^32 boundary
-// u32 and u64 storage must produce identical counts.
+// With 2³² cells, u32 and u64 storage must give the same result, as the
+// wrap-around spacing is computed through cells − 1.
 #[test]
 fn test_birthday_width_boundary_u32_matches_u64() {
     let (u, t) = (16usize, 2usize);
@@ -77,10 +77,9 @@ fn test_birthday_width_boundary_u32_matches_u64() {
     assert_eq!(c32, c64, "u32 and u64 storage must agree at cells == 2^32");
 }
 
-// cells == 2^128 in u128 storage: the largest possible grid. The tradeoff
-// runner used to panic materializing cells itself; both runners must now
-// complete and agree (the counts are ~0 at this density; the value of the
-// test is exercising the wrap arithmetic at the type limit).
+// With 2¹²⁸ cells in u128 storage, the tradeoff must give the same result as
+// the plain test. Collisions are unlikely: the test exercises the wrap-around
+// arithmetic at the limit of the type.
 #[test]
 fn test_birthday_2_pow_128_cells_tradeoff_matches_plain() {
     let (u, t, b) = (64usize, 2usize, 2usize);
@@ -107,8 +106,7 @@ fn test_birthday_2_pow_128_cells_tradeoff_matches_plain() {
     assert_eq!(c_plain, c_traded);
 }
 
-// Same property with decimation on: both runs decimate the same stream, so the
-// accepted points (and therefore the spacings) match.
+// Same, with decimation.
 #[test]
 fn test_birthday_tradeoff_matches_plain_with_decimation() {
     let (u, t, b, d) = (10usize, 2usize, 4usize, 2usize);

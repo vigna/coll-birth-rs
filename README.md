@@ -66,17 +66,19 @@ the memory figure, while in plain mode it is exactly _m_.
 
 The driver generates points from the selected PRNG, then sorts the resulting
 cell indices and either counts collisions or measures the distribution of
-birthday spacings. _p_-values are computed via [`cdflib`] against a Poisson
-reference or, for collision tests in which the variance of the number of
-collisions is smaller than its mean by more than 1% (that is, whose density,
-points over cells, exceeds ≈ 0.0075), against a normal reference with the exact
-mean and variance. This is a stricter criterion than TestU01's, which uses the
-Poisson approximation up to density 1.0001: at density 1 the Poisson variance is
-almost four times the true one, and _p_-values cluster around 1/2. In both cases
-the null distribution is conditioned on the number of points actually kept
-(relevant under decimation, where the kept count is random). The density of a
-collision test is by default ≈ 1.256431, the value that maximizes the variance
-of the number of collisions, and it can be at most 1.26.
+birthday spacings. _p_-values are computed via [`cdflib`] using the exact mean
+and variance of the count, with a Poisson approximation when the variance is at
+least 99% of the mean (always for birthday spacings), a binomial approximation
+with the same mean and variance when it is at least 54% of the mean, and a
+normal approximation otherwise. With 10⁴ points, the minimum, all tails out to
+six standard deviations are within 25% of those of the exact distribution.
+TestU01, instead, uses the Poisson approximation up to density (points over
+cells) 1.0001, but at density 1 the Poisson variance is almost four times the
+true one. The null distribution is computed using the number of points
+actually kept (relevant under decimation, where the kept count is random). By
+default, the density of a collision test is ≈ 1.256431, the value that
+maximizes the variance of the number of collisions, and it can be at most
+1.26.
 
 If multiple cores are available, an option can make the generation of the output
 happen in parallel: the part of the orbit that needs to be generated is split
@@ -220,9 +222,8 @@ Test completed in 465.96 seconds
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding
 implementation in the [`prng`] module. If skipping is possible, you can
-implement the `try_skip` method; it must either succeed for every offset
-(including 0) or fail for every offset, as the parallel runners probe the
-capability with `try_skip(0)` (see the [`prng`] module documentation).
+implement the `try_skip` method, which must succeed for every offset or for
+none (see the [`prng`] module documentation).
 
 # Example: WyRand
 

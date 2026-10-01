@@ -4,12 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Integration tests for the collision runners' public API.
+//! Tests of the collision runners.
 //!
-//! These need a reasonably uniform PRNG: the tradeoff buffer is sized assuming
-//! points spread ~evenly over the 2^(t·b) passes. A degenerate generator (e.g.
-//! incr, which maps every point to cell 0) would overflow it, so the file is
-//! gated to splitmix.
+//! Buffers are sized assuming that points are spread evenly among bins (a
+//! degenerate generator such as incr would overflow them), so the tests run
+//! only with splitmix.
 #![cfg(feature = "splitmix")]
 
 use num::BigUint;
@@ -29,8 +28,7 @@ fn grid(u: usize, t: usize, d: usize, cells: &BigUint) -> GridParams<'_> {
     }
 }
 
-// Summing collisions over 2^(t·b) tradeoff passes equals a single run on the
-// same point stream (decimation off).
+// The tradeoff must give the same result as the plain test.
 #[test]
 fn test_tradeoff_sum_equals_single_run_no_decimation() {
     let (u, t, b, d) = (8usize, 2usize, 4usize, 0usize);
@@ -68,12 +66,11 @@ fn test_tradeoff_sum_equals_single_run_no_decimation() {
     );
 }
 
-// Same exactness property with decimation on (d > 0): both runs decimate the
-// same stream, so kept points and their collisions match.
+// The tradeoff must give the same result as plain decimation.
 #[test]
 fn test_tradeoff_sum_equals_single_run_with_decimation() {
     let (u, t, b, d) = (10usize, 2usize, 4usize, 2usize);
-    // effective cell space after decimation: 2^((u-d)*t) = 2^16
+    // Cells after decimation: 2⁽ᵘ⁻ᵈ⁾ᵗ = 2¹⁶.
     let cells = BigUint::from(1u128 << ((u - d) * t));
     let g = grid(u, t, d, &cells);
 
@@ -83,8 +80,7 @@ fn test_tradeoff_sum_equals_single_run_with_decimation() {
 
     let start = Prng::new(7);
 
-    // Fixed-sample: both runs scan scan_len = points · 2^(t·d) samples; the
-    // kept count is variable, so buffers carry balls-into-bins headroom.
+    // The number of points kept is random, so buffers need headroom.
     let scan_len = points << (t * d);
 
     let mut single = start;

@@ -4,14 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Faithfulness of the parallel runners (and the single-pass recombination)
-//! against the sequential runner.
+//! Tests checking that parallel runs and single passes give the same results
+//! as sequential runs.
 //!
-//! Gated away from the degenerate incr counter: these compare a parallel run to
-//! the sequential one in tradeoff/decimation modes, whose buffer headroom assumes
-//! ~uniform spread across residue bins. A counter that maps every sample to ~one
-//! cell overflows that headroom. Every real generator (splitmix, wyrand,
-//! MSWS-CTR, LCG, MWC, Romu) exercises both the jump and pre-scan snapshot paths.
+//! Depending on the generator, the tests exercise jump-ahead or pre-scan. The
+//! incr generator is excluded, as buffers are sized assuming that points are
+//! spread evenly among bins.
 #![cfg(not(feature = "incr"))]
 
 use num::BigUint;
@@ -44,9 +42,8 @@ fn cells_for(args: &Args) -> BigUint {
     BigUint::from(2u32).pow(args.u as u32).pow(args.t as u32)
 }
 
-// Single-pass (--pass K) runs one of the 2ᵇ summable units; the per-unit
-// counts must sum to a full -b run, in both the sequential and parallel paths.
-// This pins the recombination guarantee of the single-pass design.
+// The counts of the 2ᵇ single passes (--pass K) must sum to the count of a
+// full run, both sequentially and in parallel.
 #[test]
 fn test_single_pass_collision_sum_matches_full() {
     let seed = 0xABCD_1234_5678_9ABC;
@@ -74,8 +71,8 @@ fn test_single_pass_collision_sum_matches_full() {
         "parallel single-pass counts must sum to full"
     );
 
-    // The per-pass nominal lambda shares (lambda_total / 2ᵇ) sum back to the
-    // full lambda exactly (power-of-two divisor → exact in f64).
+    // The shares of the null distribution must sum exactly to the full one
+    // (division by a power of two is exact).
     let num_passes = 1u64 << b;
     let lambda_k = test_null(points, cells.to_f64().unwrap(), false) / num_passes as f64;
     assert_eq!(
@@ -85,6 +82,7 @@ fn test_single_pass_collision_sum_matches_full() {
     );
 }
 
+// Same, for birthday spacings.
 #[test]
 fn test_single_pass_birthday_sum_matches_full() {
     let seed = 0x0BAD_F00D_DEAD_BEEF;
@@ -114,9 +112,7 @@ fn test_single_pass_birthday_sum_matches_full() {
     );
 }
 
-// Every non-decimating generator now has a faithful parallel split, so a
-// parallel run must equal the sequential run for the same seed: jump-capable
-// generators reach each thread's start via jump-ahead, others via pre-scan.
+// A parallel run must give the same result as a sequential run.
 #[test]
 fn test_faithful_plain_matches_sequential() {
     let seed = 0x00C0_FFEE_1234_5678;
@@ -131,6 +127,7 @@ fn test_faithful_plain_matches_sequential() {
     );
 }
 
+// Same, with tradeoff.
 #[test]
 fn test_faithful_tradeoff_matches_sequential() {
     let seed = 0x0D15_EA5E_0BAD_F00D;
@@ -145,8 +142,7 @@ fn test_faithful_tradeoff_matches_sequential() {
     );
 }
 
-// Fixed-sample decimation is faithfully parallel: scanning a fixed sample
-// budget makes each thread's contiguous sample-range reachable by jump/pre-scan.
+// Same, with decimation.
 #[test]
 fn test_faithful_decimation_matches_sequential() {
     let seed = 0x0DEC_1A7E_0000_0001;
@@ -164,6 +160,7 @@ fn test_faithful_decimation_matches_sequential() {
     );
 }
 
+// Same, with decimation and tradeoff.
 #[test]
 fn test_faithful_decimation_tradeoff_matches_sequential() {
     let seed = 0x0DEC_1A7E_0000_0002;
@@ -191,7 +188,7 @@ fn checkpoint_args(seed: u64) -> (Args, BigUint) {
     (args, cells)
 }
 
-// Parallel checkpoints must be faithful: same final cumulative count for any P.
+// Parallel checkpoints must give the same result for any number of threads.
 #[test]
 fn test_parallel_checkpoints_match_across_cpus() {
     let (args, cells) = checkpoint_args(0x0C0C_0C0C_0000_0001);
@@ -201,7 +198,8 @@ fn test_parallel_checkpoints_match_across_cpus() {
     assert_eq!(r1, r4, "parallel checkpoints must match across CPU counts");
 }
 
-// P=1 parallel checkpoints must equal the sequential checkpoint runner.
+// Parallel checkpoints with one thread must give the same result as
+// sequential checkpoints.
 #[test]
 fn test_parallel_checkpoints_p1_match_sequential_runner() {
     let (args, cells) = checkpoint_args(0x0C0C_0C0C_0000_0002);
@@ -214,9 +212,8 @@ fn test_parallel_checkpoints_p1_match_sequential_runner() {
     );
 }
 
-// Parallel birthday-spacings (plain, b = 0) must equal the sequential run for
-// any CPU count: the gathered interval is the same point multiset, so the
-// spacings and their collisions match.
+// A parallel birthday-spacings test must give the same result as a sequential
+// one.
 #[test]
 fn test_faithful_birthday_plain_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0001;
@@ -231,17 +228,12 @@ fn test_faithful_birthday_plain_matches_sequential() {
     assert_eq!(seq, par3, "P=3 parallel birthday must equal sequential");
 }
 
-// Regression: parallel birthday-spacings with decimation and no tradeoff (b = 0).
-// Under decimation the kept count (= number of spacings, all in the single class
-// when b = 0) is random with mean `points`; with this seed it lands at 40196 >
-// 40000, which overflowed the old zero-headroom `buffer_size(points, 0)` class
-// buffer. The class buffer must carry the full t·d + b headroom, so the run
-// completes and still matches the sequential one.
+// Same, with decimation. With this seed 40196 > 40000 points are kept, so the
+// class buffer needs headroom even if b = 0.
 //
-// Excluded for the two 32-bit LCGs: their low bits are grossly non-uniform (bit
-// i has period 2^(i+1)), and decimated birthday-spacings keys on low bits, so the
-// kept spacings pile up past the class-buffer headroom and both the sequential and
-// parallel runs hit the designed non-uniformity abort.
+// The 32-bit LCGs are excluded: their low bits are grossly non-uniform (bit i
+// has period 2ⁱ⁺¹), and decimation keys on low bits, so the class buffer
+// overflows, and both runs abort.
 #[cfg(not(any(feature = "lcg_32_32_0xec65035", feature = "lcg_32_32_0x915f77f5")))]
 #[test]
 fn test_faithful_birthday_decimation_matches_sequential() {
@@ -266,7 +258,7 @@ fn test_faithful_birthday_decimation_matches_sequential() {
     );
 }
 
-// Same, with the two-level top-bit tradeoff (b > 0).
+// Same, with tradeoff.
 #[test]
 fn test_faithful_birthday_tradeoff_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0002;
@@ -287,9 +279,8 @@ fn test_faithful_birthday_tradeoff_matches_sequential() {
     );
 }
 
-// Birthday at the cells == 2^32 storage boundary in u32 cells (the wrap-around
-// is evaluated through cells − 1, so no strictly-wider type is needed): the
-// parallel two-level tradeoff must still match the sequential runner.
+// Same, with tradeoff and 2³² cells in u32 storage (the wrap-around spacing is
+// computed through cells − 1).
 #[test]
 fn test_faithful_birthday_boundary_u32_matches_sequential() {
     let seed = 0x0B17_4DA9_0000_0003;

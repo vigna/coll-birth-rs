@@ -15,7 +15,7 @@ use coll_birth::cli::Args;
 use coll_birth::collision::run_test_parallel;
 use coll_birth::common::{compute_lambda_and_points, run_test, test_null};
 use coll_birth::prng::Prng;
-use coll_birth::stats::{format_p_value, p_value};
+use coll_birth::stats::{NullKind, format_p_value, p_value};
 
 /// Picks the smallest cell integer type that can hold every stored value.
 ///
@@ -89,23 +89,22 @@ fn main() {
     };
 
     if let Some(k) = args.pass {
-        // Single-pass mode (--pass): emit this unit's raw count and its nominal
-        // share of the null distribution (1 / 2ᵇ of the mean and, in the dense
-        // normal regime, of the variance, summed over repetitions).
+        // Single pass: print the count and the share of the null distribution
+        // (1/2ᵇ of the mean and of the variance, summed over repetitions).
         let num_passes = 1u64 << args.tradeoff_bits();
         let null_k = args.reps as f64
             * test_null(points, cells.to_f64().unwrap(), args.birthday_spacings)
             / num_passes as f64;
-        if null_k.normal {
+        if null_k.kind() == NullKind::Poisson {
             eprintln!(
-                "Single pass {k} of {num_passes}: recombine the 2ᵇ runs via a normal p-value with mean Σ lambdas and variance Σ vars"
-            );
-            println!("{tot}\tlambda={}\tvar={}", null_k.mean, null_k.var);
-        } else {
-            eprintln!(
-                "Single pass {k} of {num_passes}: recombine the 2ᵇ runs via p_value(Σ counts, Σ lambdas)"
+                "Single pass {k} of {num_passes}: the p-value is p_value(Σ counts, Null::poisson(Σ lambdas))"
             );
             println!("{tot}\tlambda={}", null_k.mean);
+        } else {
+            eprintln!(
+                "Single pass {k} of {num_passes}: the p-value is p_value(Σ counts, Null {{ mean: Σ lambdas, var: Σ vars }})"
+            );
+            println!("{tot}\tlambda={}\tvar={}", null_k.mean, null_k.var);
         }
     } else {
         // null_total is the sum of the per-repetition null distributions, each

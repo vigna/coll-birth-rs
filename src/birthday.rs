@@ -25,12 +25,15 @@ use crate::util::{Stopwatch, parallelism};
 
 /// Runs a birthday-spacings test.
 ///
-/// With decimation (`DECIMATE`), this uses the same fixed-sample model as the
-/// collision tests: scan `points` · 2*ᵗᵈ* candidate tuples and keep the
-/// ~`points` accepted (dense) indices. Without decimation it generates exactly
-/// `points` points. The parallel counterpart is [`run_birthday_parallel`].
+/// Without decimation, exactly `points` points are generated. With decimation
+/// (`DECIMATE`), `points` · 2ᵗᵈ samples are scanned, keeping about `points`
+/// points, as in [`run_collision_decimate`]. The parallel counterpart is
+/// [`run_birthday_parallel`].
 ///
-/// Returns the spacing-collision count and the number of points actually kept.
+/// Returns the number of collisions among spacings and the number of points
+/// actually kept.
+///
+/// [`run_collision_decimate`]: crate::collision::run_collision_decimate
 pub fn run_birthday<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     prng: &mut Prng,
     params: &GridParams,
@@ -74,16 +77,16 @@ pub fn run_birthday<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL:
     (c, len)
 }
 
-/// Parallel in-place computation of the spacings of a globally-sorted point
-/// set: each element is replaced by its difference with its predecessor in the
-/// sorted order, and the first element receives the circular wrap-around
-/// `cells - max + min`.
+/// Replaces in parallel the elements of a sorted slice with their spacings.
 ///
-/// The wrap-around lies in `[1..=cells]` and reaches `cells` exactly when `min
-/// == max`, which may not be representable (`cells` can be 2*ⁿ* in *n*-bit
-/// storage). It is therefore evaluated through the always-representable `cells - 1`,
-/// and in the degenerate case replaced by a nonzero stand-in: all other
-/// spacings are then zero, so the collision count is unaffected.
+/// Each element is replaced by its difference with its predecessor, and the
+/// first element by the wrap-around spacing `cells` − max + min.
+///
+/// The wrap-around spacing is at most `cells`, which might not be
+/// representable (e.g., 2⁶⁴ cells in a `u64`), and it is equal to `cells` only
+/// if min = max. Thus, it is computed through `cells` − 1, and in the
+/// degenerate case it is replaced by a nonzero value: since all other spacings
+/// are then zero, the number of collisions does not change.
 pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
     if v.is_empty() {
         return;
@@ -91,7 +94,8 @@ pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
     let global_min = v[0];
     let global_max = *v.last().unwrap();
 
-    // Aim for ~10 chunks per thread, with a floor of 1024 to amortise scheduling overhead.
+    // About ten chunks per thread, but at least 1024 elements per chunk to
+    // amortize scheduling.
     let chunk_size = (v.len() / (parallelism() * 10)).max(1024);
 
     let chunk_tails: Vec<T> = v.chunks(chunk_size).map(|c| *c.last().unwrap()).collect();
@@ -105,14 +109,14 @@ pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
         }
     });
 
-    // Patch the first entry of every chunk after the first against its predecessor's tail.
+    // Fix the first spacing of each chunk except the first one.
     v.par_chunks_mut(chunk_size)
         .enumerate()
         .skip(1)
         .for_each(|(i, c)| c[0] -= chunk_tails[i - 1]);
 
-    // The very first element still holds the global minimum: give it the
-    // circular wrap-around spacing.
+    // The first element is still the minimum: replace it with the wrap-around
+    // spacing.
     if global_min == global_max {
         v[0] = T::from_u64(1);
     } else {
@@ -123,37 +127,35 @@ pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
     }
 }
 
-/// Runs a birthday-spacings test using a space/time tradeoff, with two nested
-/// levels (each with 2*ᵇ* passes):
+/// Runs a birthday-spacings test using a space/time tradeoff with two levels,
+/// each with 2ᵇ passes.
 ///
-/// - **Inner (distance) level:** the combined index is split into 2*ᵇ* contiguous
-///   value intervals by its top *b* bits, walked in increasing order. Within an
-///   interval the points are generated, sorted, and replaced in place by their
-///   spacings (scatter-back); the previous interval's maximum is carried as the
-///   border predecessor, and the global minimum's wrap-around (`cells` − max + min)
-///   is applied once. Because the intervals are contiguous and visited in order,
-///   these are exactly the spacings of the global sorted sequence.
+/// - The inner (distance) level partitions the cell index into 2ᵇ contiguous
+///   intervals by its top *b* bits, and visits them in increasing order. The
+///   points of each interval are generated, sorted, and replaced by their
+///   spacings; the first spacing of an interval is computed using the maximum
+///   of the previous interval, and the wrap-around spacing (`cells` − max +
+///   min) is computed at the end. Since the intervals are contiguous and
+///   visited in order, these are exactly the spacings of all points.
 ///
-/// - **Outer (counting) level:** spacings are classified by their *low* *b* bits,
-///   not their top bits: spacings cluster near zero (≈ exponential), so a top-bit
-///   split would dump almost everything into one class, whereas the low bits are
-///   balanced. Only the current class's spacings are kept, sorted, and counted;
-///   equal spacings share all bits hence the same class, so the per-class counts
-///   sum to the exact total while only ~`points` / 2*ᵇ* spacings (and one
-///   interval's ~`points` / 2*ᵇ* points) are ever resident.
+/// - The outer (counting) level partitions spacings into 2ᵇ classes by their
+///   *lowest* *b* bits, as spacings cluster near zero, so their top bits are
+///   unbalanced. Each pass keeps, sorts, and counts the spacings of a class.
+///   Since equal spacings fall in the same class, the sum of the numbers of
+///   collisions of the classes is the number of collisions of all spacings,
+///   but only about `points` / 2ᵇ spacings (and `points` / 2ᵇ points) are in
+///   memory at the same time.
 ///
-/// The point multiset is identical to a single sweep, so the total equals the
-/// plain [`run_birthday`] count.
+/// The result is thus the same as that of [`run_birthday`].
 ///
-/// This is the sequential, single-repetition runner: [`crate::common::run_test`]
-/// owns the repetition loop and header above it and hands it a ready `Prng` and
-/// buffer, with `DECIMATE`/`FULL`/`DIM` specializing the hot loop as const
-/// generics. The multi-core counterpart is [`run_birthday_parallel`], which runs
-/// these same two levels over a faithful orbit split and is bit-identical.
+/// This function runs a single repetition, and it is called by [`run_test`].
+/// The parallel counterpart is [`run_birthday_parallel`], which returns the
+/// same result.
 ///
-/// Returns the spacing-collision count and the number of points actually kept
-/// (summed over the value intervals of one distance sweep; every sweep visits
-/// the same point multiset).
+/// Returns the number of collisions among spacings and the number of points
+/// actually kept.
+///
+/// [`run_test`]: crate::common::run_test
 pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     prng: &mut Prng,
     params: &GridParams,
@@ -167,15 +169,13 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     let u = params.u;
     let d = params.d;
     let num_passes: u64 = 1u64 << b;
-    // Single-pass mode (--pass K) restricts the outer loop to one spacing-class;
-    // each class still sweeps every value-interval internally, but per-class counts
-    // are independently summable, so one class can run alone.
+    // With --pass K, only class K runs (counts of different classes can be
+    // summed).
     let (pass_lo, pass_hi) = match pass {
         Some(k) => (k, k + 1),
         None => (0, num_passes),
     };
-    // The per-class "combined:" suffix only adds information when more than one
-    // spacing-class runs (a real tradeoff, not a single --pass class).
+    // Cumulative statistics are printed only if more than one class runs.
     let multi_pass = pass_hi - pass_lo > 1;
     let elem_width = if DECIMATE { u - d } else { u };
     let point_key_shift = t * elem_width - b; // top b bits select the value interval
@@ -185,8 +185,7 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     // is, and the wrap-around spacing is evaluated through it.
     let cells_m1 = T::from_u128((params.cells - BigUint::from(1u8)).to_u128().unwrap());
 
-    // One value interval keeps ~points / 2ᵇ points (with balls-into-bins headroom
-    // over the t·d + b selectivity bits).
+    // The points of an interval (about points / 2ᵇ, plus headroom).
     let mut scratch: Vec<T> = vec![T::ZERO; buffer_size(scan_len, t * d + b)];
 
     let snapshot = *prng;
@@ -195,11 +194,10 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     let mut total_points = 0usize;
     let mut sw = Stopwatch::new();
     eprintln!("Birthday tradeoff over {num_passes} spacing-classes");
-    // Per-class progress heartbeat (collision-style): each spacing-class sweeps all
-    // 2ᵇ value-intervals, so without this the run is silent for the whole sweep.
+    // Times a class, that is, a sweep over all intervals.
     let mut class_sw = Stopwatch::new();
     let cells_f64 = params.cells.to_f64().unwrap();
-    // Nominal per-class Poisson mean (null_total / 2ᵇ) for the progress p-values.
+    // The nominal null distribution of a class, for the progress p-values.
     let null_class = Null::poisson((points as f64).powi(3) / (4.0 * cells_f64) / num_passes as f64);
 
     for j in pass_lo..pass_hi {
@@ -211,8 +209,7 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
 
         for k in 0..num_passes {
             let interval_target = T::from_u64(k);
-            // Per-interval heartbeat: each value-interval is one full scan, the true
-            // analog of a collision pass; gen.../sort... print as the phases complete.
+            // Each interval requires a full scan, so we report progress.
             let mut isw = Stopwatch::new();
             eprint!(
                 "  Class {}/{} interval {}/{}: gen...",
@@ -243,9 +240,8 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
                 }
             }
             end_state = local;
-            // Each kept point lies in exactly one value interval, so summing the
-            // interval lengths of one distance sweep (the first executed) counts the
-            // points; pass_lo is 0 for a full run and K for a single-pass run.
+            // Every point lies in exactly one interval, so we count points
+            // during the first sweep only.
             if j == pass_lo {
                 total_points += len;
             }
@@ -266,9 +262,9 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
             for i in (1..len).rev() {
                 scratch[i] = scratch[i] - scratch[i - 1];
             }
-            // The first element's spacing is the border to the previous interval;
-            // for the very first interval it is the global minimum, whose spacing is
-            // the deferred wrap-around, so we skip it here.
+            // The first spacing is computed using the maximum of the previous
+            // interval; in the first interval, it is the wrap-around spacing,
+            // which is computed at the end.
             let start = match prev_max {
                 Some(pm) => {
                     scratch[0] -= pm;
@@ -288,10 +284,9 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
             prev_max = Some(interval_max);
         }
 
-        // Wrap-around spacing of the global minimum: cells − global_max +
-        // global_min. It equals cells (possibly unrepresentable) iff gmin ==
-        // gmax, i.e., all points coincide; every other spacing is then 0 ≠
-        // wrap, so dropping it leaves the collision count unchanged.
+        // The wrap-around spacing cells − max + min is equal to cells, which
+        // might not be representable, only if all points coincide: in this
+        // case all other spacings are zero, so we can drop it.
         if let (Some(gmin), Some(gmax)) = (global_min, global_max) {
             if gmin != gmax {
                 let mut wrap = cells_m1 - gmax;
@@ -335,41 +330,35 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     (total_coll, total_points)
 }
 
-/// Runs a birthday-spacings test using the same two nested levels as
-/// [`run_birthday_tradeoff`] (each with 2*ᵇ* passes), split across `num_cpus`
-/// cores via the faithful orbit partition of
-/// [`crate::collision::run_test_parallel`]:
+/// Runs a birthday-spacings test in parallel.
 ///
-/// - **Inner (distance) level:** the combined index is split into 2*ᵇ* contiguous
-///   value intervals by its top *b* bits, visited in increasing order. Within an
-///   interval each thread fills a disjoint sub-region of one buffer from its own
-///   orbit segment; the blocks are compacted into a single contiguous interval,
-///   sorted, and kept read-only. Its spacings (`interval[i] − interval[i−1]`,
-///   the first non-empty interval's first element taken against `prev_max`, the
-///   previous interval's maximum) are computed on the fly, and the global
-///   minimum's wrap-around (`cells` − max + min) is applied once, so these are
-///   exactly the spacings of the global sorted sequence.
+/// The test uses the same two levels as [`run_birthday_tradeoff`], and splits
+/// samples among threads as [`run_test_parallel`] does:
 ///
-/// - **Outer (counting) level:** spacings are classified by their *low* *b* bits,
-///   not their top bits (spacings cluster near zero, so a top-bit split would
-///   dump almost everything into one class, whereas the low bits are balanced).
-///   The matching spacings are compacted into the current class's buffer, sorted,
-///   and counted; equal spacings share all bits hence the same class, so the
-///   per-class counts sum to the exact total. With `b == 0` this degenerates to a
-///   plain parallel birthday test (one interval, one class).
+/// - At the inner (distance) level, for each interval the threads write points
+///   into disjoint regions of a buffer, which are then compacted and sorted.
+///   Spacings are computed on the fly, leaving the sorted interval unmodified;
+///   the first spacing of an interval is computed using the maximum of the
+///   previous interval, and the wrap-around spacing is computed at the end.
 ///
-/// The result is bit-identical to the sequential [`run_birthday_tradeoff`] for
-/// every CPU count and repetition.
+/// - At the outer (counting) level, the spacings of the current class are
+///   copied in parallel into a buffer, which is then sorted and scanned to
+///   count collisions. If *b* = 0, there is a single interval and a single
+///   class.
 ///
-/// Unlike [`run_birthday_tradeoff`] (which is an inner, single-repetition runner driven
-/// by [`crate::common::run_test`]), this is the top-level parallel entry point:
-/// it owns the repetition loop, header, orbit partition, and λ accumulation, and
-/// resolves the decimation/output-width/dimension modes at run time rather than
-/// as the const generics the sequential runner is monomorphized over.
+/// The result is the same as that of [`run_birthday_tradeoff`] (or
+/// [`run_birthday`] if *b* = 0) for every number of threads and repetitions.
 ///
-/// Returns the total collision count and the summed per-repetition Poisson
-/// means, each conditioned on the points the repetition actually kept (see
-/// [`crate::common::run_test`]).
+/// Differently from the sequential runners called by [`run_test`], this
+/// function runs all repetitions, prints the header, and selects modes at run
+/// time rather than using const generics.
+///
+/// Returns the total number of collisions and the sum of the null
+/// distributions of the repetitions, each conditioned on the number of points
+/// actually kept.
+///
+/// [`run_test_parallel`]: crate::collision::run_test_parallel
+/// [`run_test`]: crate::common::run_test
 pub fn run_birthday_parallel<T: Cell>(
     args: &Args,
     points: usize,
@@ -400,16 +389,13 @@ pub fn run_birthday_parallel<T: Cell>(
     let chunk = |i: usize| base_chunk + if i < rem { 1 } else { 0 };
 
     let block_cap = |i: usize| buffer_size(chunk(i), partition_bits).max(1);
-    // Per-thread sub-region capacities of the one contiguous interval buffer; their
-    // prefix sums are the sub-region starts gen_unit_contiguous writes and compacts.
+    // The capacities of the thread regions of the interval buffer.
     let caps: Box<[usize]> = (0..num_cpus).map(block_cap).collect();
     let interval_cap: usize = caps.iter().sum();
-    // The spacing-class buffer accumulates one class's spacings across every value
-    // interval; under decimation the kept count (hence spacing count) is random with
-    // mean `points`, so the buffer needs the full t·d + b balls-into-bins headroom —
-    // `buffer_size(points, b)` gives none when b == 0 (it returns exactly `points`),
-    // which overflows once the kept count exceeds its mean. This matches the
-    // sequential `run_test` sizing (`buffer_size(scan_len, partition_bits)`).
+    // The class buffer accumulates the spacings of a class over all intervals.
+    // Under decimation their number is random, with mean points, so the buffer
+    // needs the full t · d + b headroom (buffer_size(points, b) provides none
+    // if b = 0).
     let class_cap = buffer_size(scan_total, partition_bits).max(1);
 
     let params = GridParams {
@@ -426,8 +412,7 @@ pub fn run_birthday_parallel<T: Cell>(
 
     let mut mode_parts: Vec<String> = Vec::new();
     if b > 0 {
-        // The birthday tradeoff is two-level: 2ᵇ value intervals (inner sweep) by
-        // 2ᵇ spacing classes (outer sweep).
+        // Two levels: 2ᵇ value intervals by 2ᵇ spacing classes.
         mode_parts.push(format!(
             "tradeoff on {} top bits over {} value intervals x {} spacing classes",
             b, num_passes, num_passes
@@ -438,14 +423,11 @@ pub fn run_birthday_parallel<T: Cell>(
     }
     let mode_suffix = join_mode_parts(&mode_parts);
 
-    // Live memory: the one contiguous interval buffer plus the class buffer, both
-    // resident together within a repetition.
+    // The interval and class buffers are both in memory during a repetition.
     let live_elems: usize = interval_cap + class_cap;
 
-    // Both resident buffers are sized for one bin of the sample scan: the interval
-    // buffer holds one value-interval's points, the class buffer one spacing
-    // class accumulated over every interval. The nominal load is therefore twice
-    // the bin mean, and the note reports the headroom over that.
+    // Each buffer holds one bin of the scan (the points of an interval, or the
+    // spacings of a class), so the nominal load is twice the bin mean.
     let headroom_suffix = headroom_desc(
         live_elems,
         2.0 * (scan_total as f64) / 2.0f64.powi(partition_bits as i32),
@@ -460,9 +442,8 @@ pub fn run_birthday_parallel<T: Cell>(
         points,
         size_of::<T>() * 8,
         points >> b,
-        // In f64: an extreme configuration can make the byte count overflow a
-        // usize product (the allocation itself fails cleanly later, in
-        // alloc_mmap), but the header should still print.
+        // In floating point, as the size in bytes might overflow a usize (in
+        // which case alloc_mmap will fail later).
         live_elems as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
         headroom_suffix,
         mode_suffix
@@ -487,25 +468,22 @@ pub fn run_birthday_parallel<T: Cell>(
         let mut rep_coll = 0usize;
         let mut rep_points = 0usize;
         let mut psw = Stopwatch::new();
-        // Single-pass mode (--pass K) runs only spacing-class K; each class still
-        // sweeps every value-interval internally, but per-class counts are
-        // independently summable, so one class can run alone.
+        // With --pass K, only class K runs (counts of different classes can be
+        // summed).
         let (pass_lo, pass_hi) = match args.pass {
             Some(k) => (k, k + 1),
             None => (0, num_passes),
         };
-        // The per-class "combined:" suffix only adds information when more than one
-        // spacing-class runs (a real tradeoff, not plain mode or a single --pass class).
+        // Cumulative statistics are printed only if more than one class runs.
         let multi_pass = pass_hi - pass_lo > 1;
         eprintln!(
             "Rep {}/{}: {} value intervals x {} spacing classes",
             rep, args.reps, num_passes, num_passes
         );
-        // Per-class progress heartbeat (collision-style): each spacing-class sweeps
-        // all 2ᵇ value-intervals, so without this the rep is silent for hours.
+        // Times a class, that is, a sweep over all intervals.
         let mut class_sw = Stopwatch::new();
-        // Nominal per-class Poisson mean (null_total / 2ᵇ) for the progress
-        // p-values; the final rep line below conditions on the actual kept count.
+        // The nominal null distribution of a class, for the progress p-values
+        // (the final p-value is conditioned on the number of points kept).
         let null_class = test_null(points, cells_f64, true) / num_passes as f64;
 
         for j in pass_lo..pass_hi {
@@ -517,9 +495,7 @@ pub fn run_birthday_parallel<T: Cell>(
             let mut global_max: Option<T> = None;
 
             for k in 0..num_passes {
-                // Per-interval heartbeat: each value-interval is one full scan, so it
-                // is the true analog of a collision pass; print gen.../sort... as the
-                // phases complete, exactly like the collision per-pass line.
+                // Each interval requires a full scan, so we report progress.
                 let mut isw = Stopwatch::new();
                 eprint!(
                     "  Class {}/{}, interval {}/{}: gen...",
@@ -528,16 +504,14 @@ pub fn run_birthday_parallel<T: Cell>(
                     k + 1,
                     num_passes
                 );
-                // Phase 1: faithful parallel generation of interval k into one
-                // contiguous buffer. Threads fill disjoint sub-regions, then the gaps
-                // left by under-filled sub-regions are compacted away.
+                // Phase 1: generate the points of interval k into a contiguous
+                // buffer.
                 let unit: &mut [T] = bytemuck::try_cast_slice_mut(&mut interval_buf).unwrap();
                 let total = gen_unit_contiguous::<T>(
                     unit, &caps, &snapshots, &params, &chunk, k, b, decimating, full,
                 );
-                // Each kept point lies in exactly one value interval, so summing
-                // the intervals of one distance sweep (the first executed) counts the
-                // points; pass_lo is 0 for a full run and K for a single-pass run.
+                // Every point lies in exactly one interval, so we count points
+                // during the first sweep only.
                 if j == pass_lo {
                     rep_points += total;
                 }
@@ -555,13 +529,10 @@ pub fn run_birthday_parallel<T: Cell>(
                 global_max = Some(interval_max);
 
                 eprint!("[{:.3}s] filter...", isw.lap());
-                // Compact this interval's matching spacings into the class buffer. A
-                // spacing is interval[i] − interval[i−1]; the first element of the very
-                // first interval has no predecessor (its wrap is deferred), so it starts
-                // at 1. The spacings are never reused (interval_max and interval[0] were
-                // already captured) and the class buffer is sorted later, so order is
-                // irrelevant: keep interval read-only and compact on the Rayon
-                // global pool with a count-then-write two-pass over num_cpus chunks.
+                // Copy the spacings of the class into the class buffer, in two
+                // parallel passes (count, then write). The first point of the
+                // first interval is skipped, as its spacing is the wrap-around
+                // one. Order is irrelevant, as the class buffer will be sorted.
                 let start = if prev_max.is_none() { 1 } else { 0 };
                 let interval: &[T] = interval;
                 let span = total - start;
@@ -592,9 +563,8 @@ pub fn run_birthday_parallel<T: Cell>(
                 if class_len + matched > class.len() {
                     bin_overflow("a birthday-spacings class");
                 }
-                // Pass 2: write each chunk's matches into its own disjoint slot
-                // of the class buffer (prefix-sum offsets), recomputing the
-                // same spacings.
+                // Pass 2: each chunk recomputes its matching spacings and
+                // writes them into its own slice of the class buffer.
                 {
                     let mut rest = &mut class[class_len..class_len + matched];
                     let mut dsts: Vec<&mut [T]> = Vec::with_capacity(num_cpus);
@@ -620,10 +590,9 @@ pub fn run_birthday_parallel<T: Cell>(
                 prev_max = Some(interval_max);
             }
 
-            // Wrap-around spacing of the global minimum: cells − global_max + global_min.
-            // It equals cells (possibly unrepresentable) iff gmin == gmax, i.e., all
-            // points coincide; every other spacing is then 0 ≠ wrap, so dropping it
-            // leaves the collision count unchanged.
+            // The wrap-around spacing cells − max + min is equal to cells,
+            // which might not be representable, only if all points coincide: in
+            // this case all other spacings are zero, so we can drop it.
             if let (Some(gmin), Some(gmax)) = (global_min, global_max) {
                 if gmin != gmax {
                     let mut wrap = cells_m1 - gmax;
@@ -663,15 +632,14 @@ pub fn run_birthday_parallel<T: Cell>(
         }
 
         tot += rep_coll as u128;
-        // Condition the per-rep Poisson mean on the points actually kept.
+        // Condition the null distribution on the points actually kept.
         let null_rep = test_null(rep_points, cells_f64, true);
         null_sum += null_rep;
         let elapsed = psw.lap();
         if args.pass.is_some() {
-            // Single-pass mode: `rep_coll` is one spacing-class's count (mean
-            // λ/2ᵇ), so a p-value against the full per-rep mean would be
-            // meaningless; the recombinable count/λ-share pair is printed by
-            // main. Report the raw counts only.
+            // With --pass, rep_coll is the count of one class, so a p-value
+            // would be meaningless: main prints the count and the share of the
+            // null distribution.
             if args.reps > 1 {
                 eprintln!("[{elapsed:.3}s] {rep_coll}\tcombined: {tot}");
             } else {
@@ -693,16 +661,15 @@ pub fn run_birthday_parallel<T: Cell>(
     (tot, null_sum)
 }
 
-// Direct tests of the wrap-around arithmetic in compute_spacings at the
-// cells == 2ᴺ storage boundary; no PRNG involved, so no feature gate.
+// Tests of the wrap-around spacing of compute_spacings with 2ᴺ cells in N-bit
+// storage (no generator is involved).
 #[cfg(test)]
 mod spacing_tests {
     use super::*;
     use num::BigUint;
 
-    // Non-degenerate at the boundary: sorted points {3, 10, 2⁶⁴ − 1} on a circle
-    // of 2⁶⁴ cells have spacings {7, 2⁶⁴ − 11} and wrap 2⁶⁴ − (2⁶⁴ − 1) + 3 = 4,
-    // none of which overflow u64 despite cells itself being unrepresentable.
+    // Points {3, 10, 2⁶⁴ − 1} on 2⁶⁴ cells have spacings {7, 2⁶⁴ − 11} and
+    // wrap-around spacing 2⁶⁴ − (2⁶⁴ − 1) + 3 = 4, all representable in a u64.
     #[test]
     fn test_wrap_at_width_boundary_is_exact() {
         let cells = BigUint::from(1u8) << 64;
@@ -713,9 +680,9 @@ mod spacing_tests {
         assert_eq!(v[2], u64::MAX - 10);
     }
 
-    // Degenerate case at the boundary: all points coincide, so the wrap-around
-    // would equal cells == 2⁶⁴. It is replaced by a nonzero stand-in; the n − 1
-    // zero spacings then yield exactly n − 2 collisions, the true count.
+    // If all n points coincide, the wrap-around spacing would be 2⁶⁴; it is
+    // replaced by a nonzero value, so the n − 1 zero spacings yield the correct
+    // count n − 2.
     #[test]
     fn test_degenerate_equal_points_at_width_boundary() {
         let cells = BigUint::from(1u8) << 64;

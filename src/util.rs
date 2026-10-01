@@ -9,12 +9,10 @@
 use std::fmt::Display;
 use std::time::Instant;
 
-/// Renders an integer as a Unicode superscript string, so exponents such as 2⁶⁴
-/// can be printed inline; e.g. `superscript(64)` returns `"⁶⁴"`.
+/// Returns the representation of an integer using Unicode superscripts.
 ///
-/// The value is taken through [`Display`], so every integer type works without a
-/// cast. Decimal digits map to their superscript code points and `-` to the
-/// superscript minus `⁻`; any other character is passed through unchanged.
+/// For example, `superscript(64)` returns `"⁶⁴"`. Digits and `-` are replaced
+/// by their superscript counterparts; other characters are left unchanged.
 pub fn superscript(n: impl Display) -> String {
     n.to_string()
         .chars()
@@ -35,18 +33,17 @@ pub fn superscript(n: impl Display) -> String {
         .collect()
 }
 
-/// Number of threads in the Rayon global thread pool.
+/// Returns the number of threads of the Rayon global thread pool.
 ///
-/// This is the single thread-count source for every parallel phase—generation
-/// fan-out, sorting, and counting—so all of them honour `RAYON_NUM_THREADS`
-/// (which itself defaults to the number of available cores).
+/// All parallel phases (generation, sorting, and counting) use this number of
+/// threads, so they all honor `RAYON_NUM_THREADS` (by default, the number of
+/// available cores).
 pub fn parallelism() -> usize {
     rayon::current_num_threads()
 }
 
-/// Records elapsed time between successive [`Stopwatch::lap`] calls.
-///
-/// Used to print progress lines of the form `... [X.XXXs] next-step...`.
+/// A stopwatch measuring the time elapsed between successive calls to
+/// [`Stopwatch::lap`].
 pub struct Stopwatch(Instant);
 
 impl Stopwatch {
@@ -54,7 +51,8 @@ impl Stopwatch {
         Self(Instant::now())
     }
 
-    /// Seconds elapsed since the previous lap (or since construction), resetting the clock.
+    /// Returns the seconds elapsed since the previous lap (or since creation),
+    /// and starts a new lap.
     pub fn lap(&mut self) -> f64 {
         let elapsed = self.0.elapsed().as_secs_f64();
         self.0 = Instant::now();

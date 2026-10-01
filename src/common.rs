@@ -18,26 +18,26 @@ use crate::cell::{Cell, cell_index, decimate_once};
 use crate::cli::Args;
 use crate::collision::{run_collision, run_collision_decimate, run_collision_tradeoff};
 use crate::prng::Prng;
-use crate::stats::{MAX_DENSITY, Null, VARIANCE_MAXIMIZING_DENSITY, format_p_value, p_value};
+use crate::stats::{
+    MAX_DENSITY, Null, NullKind, VARIANCE_MAXIMIZING_DENSITY, format_p_value, p_value,
+};
 use crate::util::{Stopwatch, parallelism, superscript};
 
-/// Allocates an mmap-backed slice and eagerly faults it as transparent huge pages.
+/// Allocates a memory-mapped buffer of `n` elements of type `T`, prefaulting it
+/// as transparent huge pages.
 ///
-/// We deliberately do not pass [`MmapFlags::POPULATE`] (`MAP_POPULATE`), as it
-/// would prefault the whole region as base (4 KiB) pages during the `mmap()`
-/// syscall.
+/// # Implementation Details
 ///
-/// Instead, we use [`MmapFlags::TRANSPARENT_HUGE_PAGES`] and prefault the
-/// region ourselves by touching one byte per 2 MiB, so each fault takes the
-/// huge-page path. On a kernel with THP disabled the touches still prefault (as
-/// base pages), so behaviour degrades gracefully rather than regressing.
+/// [`MmapFlags::POPULATE`] would prefault the buffer as base (4 KiB) pages, so
+/// we use [`MmapFlags::TRANSPARENT_HUGE_PAGES`] and prefault the buffer by
+/// touching one byte every 2 MiB. If transparent huge pages are disabled, the
+/// buffer is still prefaulted, as base pages.
 ///
 /// [`MmapFlags::POPULATE`]: mmap_rs::MmapFlags::POPULATE
 /// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: mmap_rs::MmapFlags::TRANSPARENT_HUGE_PAGES
 pub(crate) fn alloc_mmap<T>(n: usize) -> MmapMut {
-    // A failed or unrepresentable allocation is a resource/configuration error,
-    // not a program bug: report it cleanly (no backtrace, no abort message) so
-    // the user knows to reduce m or add tradeoff bits.
+    // A failed allocation is not a bug, so we exit with an explanation rather
+    // than panicking.
     fn alloc_error(n: usize, detail: &dyn std::fmt::Display) -> ! {
         eprintln!(
             "\ncannot allocate a buffer of {n} memory locations: {detail}; \
@@ -63,23 +63,23 @@ pub(crate) fn alloc_mmap<T>(n: usize) -> MmapMut {
     mapped
 }
 
-/// Buffer size needed for the active sampling mode.
+/// Returns the size of a buffer for the points of a bin.
 ///
-/// A pass keeps the samples whose selection key (the *t* · *d* decimation
-/// residue bits plus the *b* top tradeoff bits, `partition_bits` in all)
-/// matches a fixed value, that is, one "bin" of a balls-into-bins experiment
-/// with `points` balls and *n* = 2^`partition_bits` bins. A single bin load
-/// is a sum of independent indicators, so writing *m* for its mean
-/// `points`/*n*, Bernstein's inequality bounds Pr[load ≥ *m* + λ] by
-/// exp(−λ²/(2(*m* + λ/3))); a union bound over the *n* bins then makes the
-/// probability that *any* bin exceeds *m* + λ at most *n* · exp(−λ²/(2(*m* +
-/// λ/3))), which is below 10⁻¹⁰⁰⁰ for λ = *L*/3 + √(*L*²/9 + 2·*m*·*L*) with
-/// *L* = ln *n* + 1000 · ln 10 (the exact inversion of the exponent). The
-/// headroom's shape is tight: by Theorem 1 of [Raab & Steger] the maximum load
-/// actually reaches *m* + √(2·*m*·ln *n*) · (1 − o(1)) in the heavily-loaded
-/// regime, so little can be shaved.
+/// A pass keeps the samples whose `partition_bits` selection bits (*t* · *d*
+/// decimation bits and *b* tradeoff bits) have a given value, that is, one of
+/// the *n* = 2^`partition_bits` bins of a balls-into-bins experiment with
+/// `points` balls. If `partition_bits` is zero, the result is `points`.
 ///
-/// [Raab & Steger]: https://doi.org/10.1007/3-540-49543-6_13
+/// Since the load of a bin is a sum of independent indicators, by Bernstein's
+/// inequality and a union bound the probability that some bin receives at
+/// least *m* + λ balls, where *m* = `points` / *n*, is at most *n* ·
+/// exp(−λ² / (2(*m* + λ / 3))). This bound is 10⁻¹⁰⁰⁰ for λ = *L* / 3 +
+/// √(*L*² / 9 + 2*mL*), where *L* = ln *n* + 1000 ln 10.
+///
+/// The bound is essentially tight: by Theorem 1 of [Raab and Steger], in the
+/// heavily loaded case the maximum load is *m* + √(2*m* ln *n*) (1 − *o*(1)).
+///
+/// [Raab and Steger]: https://doi.org/10.1007/3-540-49543-6_13
 pub fn buffer_size(points: usize, partition_bits: usize) -> usize {
     if partition_bits == 0 {
         return points;
@@ -92,15 +92,13 @@ pub fn buffer_size(points: usize, partition_bits: usize) -> usize {
     ((mean + dev).ceil() as usize).min(points)
 }
 
-/// Aborts cleanly when a sampling bin (tradeoff pass, decimation keep-set,
-/// spacing class, …) overflows its [`buffer_size`]-sized buffer.
+/// Exits the process when a bin (e.g., a tradeoff pass or a spacing class)
+/// overflows its buffer.
 ///
-/// The headroom is set so that, for a uniform generator, a bin exceeds its
-/// buffer with probability below 10⁻¹⁰⁰⁰ (see [`buffer_size`]). An overflow
-/// therefore means the generator has just failed a trivial serial load-balance
-/// test by an astronomical margin. Exits the whole process (also from a worker
-/// thread) rather than panicking, so the message isn't buried under a
-/// backtrace.
+/// Since buffers are sized by [`buffer_size`], for a uniform generator this
+/// happens with probability less than 10⁻¹⁰⁰⁰, so the generator is grossly
+/// non-uniform. We exit rather than panicking, also in worker threads, so that
+/// the message is not buried under a backtrace.
 pub(crate) fn bin_overflow(what: &str) -> ! {
     eprintln!(
         "\n{what} overflowed its buffer: a bin received more elements than its \
@@ -112,13 +110,14 @@ pub(crate) fn bin_overflow(what: &str) -> ! {
     std::process::exit(1);
 }
 
-/// Samples scanned per pass: `points` · 2*ᵗᵈ*. Uses an overflow check:
-/// [`checked_shl`] alone only guards the shift amount, not the resulting value, so
-/// a too-large *t* · *d* would silently wrap. A configuration whose sample budget
-/// does not fit in a usize (points · 2*ᵗᵈ* ≥ 2⁶⁴; points already carries the
-/// 2*ᵇ* tradeoff factor) surfaces here as a clean overflow error.
+/// Returns the number of samples scanned by a pass, that is, `points` · 2ᵗᵈ.
 ///
-/// [`checked_shl`]: u32::checked_shl
+/// # Panics
+///
+/// Panics if the result does not fit in a `usize`. Note that [`checked_shl`]
+/// checks only the shift amount, so the product must be checked separately.
+///
+/// [`checked_shl`]: usize::checked_shl
 pub(crate) fn scan_samples(points: usize, t: usize, d: usize) -> usize {
     1usize
         .checked_shl((t * d) as u32)
@@ -126,7 +125,7 @@ pub(crate) fn scan_samples(points: usize, t: usize, d: usize) -> usize {
         .expect("points · 2ᵗᵈ overflows usize")
 }
 
-/// "full 64-bit output" or "lowest N bits": which bits of each draw the test reads.
+/// Returns the header description of the bits of each output used by the test.
 pub(crate) fn bits_read_desc(s: usize) -> String {
     if s == 0 {
         "full 64-bit output".to_string()
@@ -135,7 +134,7 @@ pub(crate) fn bits_read_desc(s: usize) -> String {
     }
 }
 
-/// The shared decimation descriptor for the header's mode list.
+/// Returns the header description of decimation.
 pub(crate) fn decimation_desc(d: usize, t: usize) -> String {
     format!(
         "decimating {} bits per dimension (~2{} candidate samples per kept sample)",
@@ -144,11 +143,10 @@ pub(crate) fn decimation_desc(d: usize, t: usize) -> String {
     )
 }
 
-/// How the header describes parallel generation.
+/// Returns the header description of parallel generation.
 ///
-/// `num_cpus` is the number of orbit segments actually used, which
-/// [`OrbitPartition::new`] clamps to the sample count. For a short scan, that
-/// is below the pool size, and the header should report the real fan-out.
+/// `num_cpus` must be the number of threads actually used, which might be
+/// smaller than the size of the thread pool (see [`OrbitPartition::new`]).
 pub(crate) fn generation_desc(num_cpus: usize, split_desc: &str) -> String {
     format!(
         "using {} parallel generator{} ({})",
@@ -158,19 +156,14 @@ pub(crate) fn generation_desc(num_cpus: usize, split_desc: &str) -> String {
     )
 }
 
-/// The " (+*N.NN*%)" note the header appends to its memory figure.
+/// Returns the header note " (+*x*%)" on the headroom of buffers.
 ///
-/// `capacity` is what one work unit allocates and `nominal` the load it would
-/// carry if the samples split perfectly across the 2^`partition_bits` bins, so
-/// the note reports what the balls-into-bins headroom of [`buffer_size`] adds on
-/// top. Empty when nothing partitions the samples (`partition_bits == 0`), where
-/// the buffer holds exactly the point count and there is no headroom to report.
+/// `capacity` is the size of the buffers, and `nominal` the load they would
+/// carry if samples were split evenly among the 2^`partition_bits` bins. The
+/// note is empty if `partition_bits` is zero, as there is no headroom.
 ///
-/// `nominal` is an `f64` because the parallel birthday runner keeps two buffers
-/// of that load resident at once, and because `partition_bits` = *t*·*d* + *b*
-/// can exceed 63 through the decimation term: 2^`partition_bits` must be formed
-/// in floating point to avoid a shift overflow. This is a cosmetic header figure
-/// only.
+/// `nominal` is an `f64` because 2^`partition_bits` might not fit in a `usize`
+/// (*t* · *d* might exceed 63).
 pub(crate) fn headroom_desc(capacity: usize, nominal: f64, partition_bits: usize) -> String {
     if partition_bits == 0 {
         return String::new();
@@ -178,8 +171,8 @@ pub(crate) fn headroom_desc(capacity: usize, nominal: f64, partition_bits: usize
     format!(" (+{:.2}%)", (capacity as f64 / nominal - 1.0) * 100.0)
 }
 
-/// Joins the per-mode descriptors into the header's trailing ", a, b" suffix (empty
-/// when there are none).
+/// Returns the header suffix listing the given mode descriptions, each
+/// preceded by a comma.
 pub(crate) fn join_mode_parts(parts: &[String]) -> String {
     if parts.is_empty() {
         String::new()
@@ -188,7 +181,8 @@ pub(crate) fn join_mode_parts(parts: &[String]) -> String {
     }
 }
 
-/// The " (effective cells after decimation: 2*ᴺ*)" header note (empty when `d == 0`).
+/// Returns the header note on the number of cells after decimation (empty if
+/// *d* = 0).
 pub(crate) fn effective_cells_suffix(d: usize, u: usize, t: usize) -> String {
     if d > 0 {
         format!(
@@ -200,32 +194,29 @@ pub(crate) fn effective_cells_suffix(d: usize, u: usize, t: usize) -> String {
     }
 }
 
-/// Geometric parameters of a test grid.
-///
-/// The whole-tuple decimation bits are encoded as a const generic on the test
-/// runners (and on [`GridParams::draw`]) rather than a field, so the `B == 0`
-/// fast path inside [`cell_index`] is selected at compile time.
+/// The parameters of a test grid.
 pub struct GridParams<'a> {
-    /// log₂ of the number of subdivisions per dimension (the *u* value).
+    /// The base-2 logarithm *u* of the number of subdivisions per dimension.
     pub u: usize,
-    /// Number of dimensions.
+    /// The number *t* of dimensions.
     pub t: usize,
-    /// Left shift applied to each PRNG output before extracting cell bits.
+    /// The left shift *s* applied to each output before extracting bits.
     pub s: usize,
-    /// Decimation bits: low *d* bits of each element forced to zero (0 = none).
+    /// The number *d* of decimation bits (zero for no decimation).
     pub d: usize,
-    /// Total cell count; needed by the birthday-spacings wrap-around.
+    /// The number of cells, used by the wrap-around spacing.
     pub cells: &'a BigUint,
 }
 
 impl GridParams<'_> {
+    /// Returns a cell index drawn from `prng` (see [`cell_index`]).
     #[inline]
     pub fn draw<T: Cell, const DIM: usize, const FULL: bool>(&self, prng: &mut Prng) -> T {
         cell_index::<T, DIM, FULL>(prng, self.t, self.u, self.s)
     }
 
-    /// One decimating attempt (exactly *t* draws) returning the compacted dense
-    /// index when accepted, `None` when rejected. See [`decimate_once`].
+    /// Draws a candidate tuple from `prng` and returns its decimated cell
+    /// index, or `None` if the tuple is rejected (see [`decimate_once`]).
     #[inline]
     pub fn draw_decimate_once<T: Cell, const DIM: usize, const FULL: bool>(
         &self,
@@ -235,14 +226,14 @@ impl GridParams<'_> {
     }
 }
 
-/// Counts adjacent equal pairs in a sorted slice (i.e. one less than the
-/// multiplicity sum).
+/// Returns the number of pairs of adjacent equal elements of a sorted slice,
+/// that is, the number of elements minus the number of distinct elements.
 ///
-/// Parallelized by contiguous chunks rather than `par_windows`: each chunk counts
-/// the equal pairs strictly inside it, and the one pair straddling each chunk
-/// boundary is added back (the border fix). Chunked streaming reads are far kinder
-/// to cache and the memory subsystem than overlapping windows at very large `n`,
-/// where `par_windows` becomes a bottleneck.
+/// # Implementation Details
+///
+/// The slice is split into contiguous chunks, and pairs straddling chunk
+/// boundaries are counted separately: on very large slices, this is much
+/// faster than `par_windows`.
 #[inline]
 pub(crate) fn count_adjacent_equals<T: Cell>(v: &[T]) -> usize {
     if v.len() < 2 {
@@ -272,13 +263,14 @@ pub(crate) fn count_adjacent_equals<T: Cell>(v: &[T]) -> usize {
     within + borders
 }
 
-/// Three-pointer right-to-left merge of `buf[..prefix_len]` (sorted) with `src` (sorted)
-/// into `buf[..prefix_len + src.len()]`.
+/// Merges the sorted slice `src` into the sorted prefix `buf[..prefix_len]`,
+/// leaving the result in `buf[..prefix_len + src.len()]`.
 ///
-/// Walking the write pointer from the high end downward means we only ever overwrite
-/// positions strictly above any still-unread element of the prefix, so no swaps or
-/// scratch slots are needed beyond `src` itself. Prefix elements that remain when `src`
-/// is exhausted are already at their correct positions and require no copy.
+/// # Implementation Details
+///
+/// The merge proceeds right to left, so it never overwrites an element of the
+/// prefix that has not been read yet, and no additional space is needed. When
+/// `src` is exhausted, the remaining elements of the prefix are in place.
 pub(crate) fn merge_into<T: Cell>(buf: &mut [T], prefix_len: usize, src: &[T]) {
     let mut i = prefix_len;
     let mut j = src.len();
@@ -300,10 +292,13 @@ pub(crate) fn merge_into<T: Cell>(buf: &mut [T], prefix_len: usize, src: &[T]) {
     }
 }
 
-/// The faithful contiguous-orbit partition shared by both parallel runners. A scan
-/// of `scan_total` samples is split into `num_cpus` contiguous sample-ranges; each
-/// range's start is reached by jump-ahead (`try_skip`) for skip-capable generators
-/// or by a chained sequential pre-scan ([`prescan_checkpoints`]) otherwise.
+/// A partition of the orbit of the generator among threads.
+///
+/// A scan of `scan_total` samples is split into `num_cpus` contiguous ranges.
+/// The start of each range is reached by jump-ahead (`try_skip`) if the
+/// generator supports it, or by a sequential pre-scan
+/// ([`prescan_checkpoints`]) otherwise. In both cases, the result of a parallel
+/// run is the same as that of a sequential run.
 pub(crate) struct OrbitPartition {
     pub(crate) num_cpus: usize,
     pub(crate) scan_total: usize,
@@ -312,22 +307,20 @@ pub(crate) struct OrbitPartition {
     t: usize,
     skip_capable: bool,
     seed: u64,
-    /// Pre-scan path only: the orbit start of the next repetition, chained across
-    /// reps (a non-jumpable generator cannot recompute an absolute offset).
+    /// The start of the next repetition, used only by the pre-scan, which
+    /// cannot reach an absolute offset.
     prescan_start: Prng,
 }
 
 impl OrbitPartition {
     pub(crate) fn new(seed: u64, num_cpus: usize, scan_total: usize, t: usize) -> Self {
-        // The prng module requires try_skip to either succeed for every offset
-        // or fail for every offset, so probing with 0 decides skip capability
-        // for all the offsets used below.
+        // try_skip succeeds for every offset or for none (see the prng module).
         let skip_capable = {
             let mut probe = Prng::new(seed);
             probe.try_skip(0).is_ok()
         };
-        // Never spawn more threads than there are samples: otherwise a thread's chunk
-        // is empty, buffer_size(0, …) is 0, and alloc_mmap(0) aborts with InvalidSize.
+        // There cannot be more threads than samples, as an empty chunk would
+        // lead to a zero-size allocation, which alloc_mmap rejects.
         let num_cpus = num_cpus.min(scan_total).max(1);
         Self {
             num_cpus,
@@ -341,10 +334,12 @@ impl OrbitPartition {
         }
     }
 
+    /// Returns the first sample of thread `i`.
     pub(crate) fn start_sample(&self, i: usize) -> usize {
         i * self.base_chunk + i.min(self.rem)
     }
 
+    /// Returns the header description of how the orbit is split.
     pub(crate) fn split_desc(&self) -> &'static str {
         if self.skip_capable {
             "jump-ahead"
@@ -353,11 +348,13 @@ impl OrbitPartition {
         }
     }
 
-    /// Per-thread orbit-start snapshots: thread `i` starts at sample `base +
-    /// boundaries[i]` of the orbit, reached over a `scan_len`-sample window. Skip-capable
-    /// generators jump to the absolute offset; others chain a pre-scan (advancing
-    /// `prescan_start`). When `prescan_label` is `Some`, the pre-scan is timed and
-    /// announced (the standard per-rep path); the checkpoint path passes `None`.
+    /// Returns the generator states at which threads start.
+    ///
+    /// Thread `i` starts at sample `base + boundaries[i]`, in a window of
+    /// `scan_len` samples. With jump-ahead, the states are computed from the
+    /// seed; otherwise, the window is pre-scanned starting from the end of the
+    /// previous pre-scan. If `prescan_label` is not `None`, the pre-scan is
+    /// announced and timed.
     pub(crate) fn snapshots(
         &mut self,
         base: usize,
@@ -373,10 +370,8 @@ impl OrbitPartition {
                         .checked_mul(self.t as u64)
                         .expect("orbit offset overflows u64");
                     let mut p = Prng::new(self.seed);
-                    p.try_skip(off).expect(
-                        "try_skip(0) succeeded but try_skip(n) failed: try_skip must \
-                         either succeed or fail for every offset",
-                    );
+                    p.try_skip(off)
+                        .expect("try_skip must succeed for every offset or for none");
                     p
                 })
                 .collect()
@@ -395,8 +390,8 @@ impl OrbitPartition {
         }
     }
 
-    /// Snapshots for one full-scan repetition (the standard per-rep path): each thread
-    /// owns its contiguous chunk, and the pre-scan (if any) is announced as `Pre-scan`.
+    /// Returns the generator states at which threads start in repetition `rep`
+    /// (one-based), in which each thread scans a contiguous chunk.
     pub(crate) fn rep_snapshots(&mut self, rep: usize) -> Box<[Prng]> {
         let boundaries: Box<[usize]> = (0..self.num_cpus).map(|i| self.start_sample(i)).collect();
         self.snapshots(
@@ -408,20 +403,16 @@ impl OrbitPartition {
     }
 }
 
-/// Sequentially walk `total_cells` samples of the orbit starting from `start`
-/// (each sample consumes exactly *t* PRNG draws, in every mode; decimation still
-/// draws *t* per sample, it just conditionally rejects the result), capturing a
-/// copy of the generator when the walk reaches each cell index in `boundaries`
-/// (which must be sorted ascending and lie in `0..total_cells`).
+/// Scans sequentially `total_cells` samples of *t* outputs (also under
+/// decimation, see [`decimate_once`]) starting from `start`, and returns the
+/// generator states at the samples in `boundaries`, together with the final
+/// state.
 ///
-/// Returns one snapshot per boundary plus the end state (after all
-/// `total_cells` cells), so the caller can chain the next repetition's walk.
-/// Snapshot `i` is bit-identical to `try_skip(boundaries[i] * t)` for
-/// jump-capable generators.
-///
-/// Used to give non-jumpable generators a faithful parallel split: the walk is
-/// inherently sequential (it follows the orbit) and cannot be parallelized
-/// without jump-ahead, which is exactly what these generators lack.
+/// `boundaries` must be sorted, and its elements must be smaller than
+/// `total_cells`. The state at `boundaries[i]` is the same that
+/// `try_skip(boundaries[i] * t)` would yield, so this function makes it
+/// possible to split the orbit among threads for generators that cannot jump
+/// ahead. The final state is the start of the next repetition.
 pub(crate) fn prescan_checkpoints(
     start: Prng,
     t: usize,
@@ -448,14 +439,11 @@ pub(crate) fn prescan_checkpoints(
     (snaps.into_boxed_slice(), p)
 }
 
-/// Per-thread generate (no sort) of one pass for the parallel collision test.
-/// Returns the number of valid elements written to `buf`, together with the
-/// orbit position reached after consuming `stream_len` draws (so the caller can
-/// continue this thread's orbit in the next repetition). Sorting is a separate,
-/// independently-timed phase in the caller.
+/// Generates the points of a thread in a pass, scanning `stream_len` samples
+/// starting from state `snapshot`.
 ///
-/// `snapshot` is the thread's orbit start; in tradeoff mode it is replayed for
-/// every pass, so callers pass the same snapshot each time and vary `pass`.
+/// Returns the number of points written to `buf` and the final state. In
+/// tradeoff mode, all passes start from the same state.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_pass_dispatch<T: Cell>(
     snapshot: Prng,
@@ -470,8 +458,7 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
     macro_rules! go {
         ($dim:literal) => {{
             if tradeoff_b > 0 {
-                // FULL (u == 64 && s == 0) short-circuits the shift+mask in the
-                // per-sample draw, exactly as in the plain path below.
+                // FULL (u = 64 and s = 0) makes the extraction the identity.
                 match (decimating, full) {
                     (true, true) => gen_pass_tradeoff::<T, $dim, true, true>(
                         snapshot, params, buf, stream_len, pass, tradeoff_b,
@@ -487,9 +474,7 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
                     ),
                 }
             } else {
-                // No tradeoff: a single pass that consumes stream_len fresh draws.
-                // gen_plain advances prng in place, so it ends at the
-                // thread's next orbit position.
+                // No tradeoff: a single pass.
                 let mut prng = snapshot;
                 let used = if decimating {
                     if full {
@@ -519,19 +504,20 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
     }
 }
 
-/// Close the gaps left by under-filled per-thread sub-regions, in place.
+/// Closes in place the gaps left by partially filled thread regions, and
+/// returns the number of points.
 ///
-/// `buf` is partitioned into `caps[i]`-sized sub-regions (sub-region `i` begins at
-/// the prefix sum of `caps[..i]`); thread `i` wrote `used[i] ≤ caps[i]` kept points
-/// into the front of its sub-region. This shifts each block left to close the gaps,
-/// leaving the kept points contiguous in `buf[..total]`, and returns `total = Σ used`.
+/// `buf` is partitioned into regions of size `caps[i]`, and thread `i` wrote
+/// `used[i]` ≤ `caps[i]` points at the start of its region. This function
+/// moves the points so that they are contiguous at the start of `buf`.
 ///
-/// Every destination is ≤ its source (since `Σ used ≤ Σ caps`), so the moves are
-/// leftward; performed left to right, block `i`'s destination ends at the start of
-/// block `i+1`'s still-untouched source and block `i−1` has already vacated, so no
-/// move clobbers an unread source. `copy_within` covers the intra-block overlap. In
-/// plain mode `used[i] == caps[i]`, every destination equals its source, and this is
-/// a no-op.
+/// # Implementation Details
+///
+/// Since the prefix sums of `used` are bounded by those of `caps`, every block
+/// moves leftward. Blocks are moved left to right, and the destination of
+/// block `i` ends before the source of block `i` + 1, so no move overwrites a
+/// source that has not been moved yet; `copy_within` handles overlaps within a
+/// block. If `used[i]` = `caps[i]` for all `i`, nothing is moved.
 fn compact_blocks<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usize {
     debug_assert_eq!(caps.len(), used.len());
     let mut src_base = 0usize;
@@ -547,17 +533,14 @@ fn compact_blocks<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usi
     dst
 }
 
-/// Faithfully generate one work-unit's points into a single contiguous buffer.
+/// Generates in parallel the points of a pass into a contiguous buffer, and
+/// returns the number of points.
 ///
-/// Threads fill disjoint `caps`-sized sub-regions of `buf` from their orbit
-/// `snapshots` (via [`gen_pass_dispatch`]); the gaps left by under-filled
-/// sub-regions are then closed in place by [`compact_blocks`]. Returns `total_used`;
-/// on return `buf[..total_used]` holds the kept points (unsorted) so that a single
-/// [`Cell::sort_mt`] + linear [`count_adjacent_equals`] serves both tests, replacing
-/// the per-thread buffers + k-way merge the parallel collision runner used before.
-///
-/// `buf.len()` must be at least `Σ caps`; each `caps[i]` is the headroom-sized
-/// capacity of thread `i`'s sub-region and `chunk(i)` its sample-stream length.
+/// Thread `i` scans `chunk(i)` samples starting from `snapshots[i]`, and writes
+/// the points it keeps into a region of `buf` of size `caps[i]` (see
+/// [`gen_pass_dispatch`]). The regions are then compacted (see
+/// [`compact_blocks`]), so the points are stored, unsorted, at the start of
+/// `buf`, whose length must be at least Σ `caps`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_unit_contiguous<T: Cell>(
     buf: &mut [T],
@@ -573,10 +556,7 @@ pub(crate) fn gen_unit_contiguous<T: Cell>(
     let num_cpus = caps.len();
     debug_assert_eq!(snapshots.len(), num_cpus);
 
-    // Phase 1: split buf into the caps-sized disjoint sub-regions, then let the
-    // Rayon global pool fill each one from its segment's orbit snapshot. One task
-    // per sub-region, so with the standard sizing (num_cpus == pool threads) each
-    // Rayon worker owns exactly one segment.
+    // Phase 1: fill the regions in parallel, one task per region.
     let regions: Vec<&mut [T]> = {
         let mut regions = Vec::with_capacity(num_cpus);
         let mut rest = &mut buf[..];
@@ -609,10 +589,8 @@ pub(crate) fn gen_unit_contiguous<T: Cell>(
     compact_blocks(buf, caps, &used)
 }
 
-/// Generate (no sort) one plain pass: `points` fresh draws into `buf`. Returns
-/// the number written (`points`); `prng` is advanced in place to the thread's
-/// next orbit position. Sorting is done as a separate phase by the caller so it
-/// can be timed independently (mirroring the sequential `gen/sort/count` split).
+/// Generates the points of a pass without tradeoff, scanning `scan_len`
+/// samples, and returns the number of points written to `buf`.
 fn gen_plain<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     prng: &mut Prng,
     params: &GridParams,
@@ -620,7 +598,7 @@ fn gen_plain<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     scan_len: usize,
 ) -> usize {
     if DECIMATE {
-        // Fixed-sample: scan scan_len candidate tuples, keep the accepted ones.
+        // Keep the accepted samples.
         let mut len = 0usize;
         for _ in 0..scan_len {
             if let Some(x) = params.draw_decimate_once::<T, DIM, FULL>(prng) {
@@ -638,16 +616,11 @@ fn gen_plain<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     }
 }
 
-/// Tradeoff, one pass (generate only, no sort): replay `snapshot` for
-/// `stream_len` draws and keep only the points whose packed tradeoff key equals
-/// `pass`. Returns the number kept (~`stream_len` / 2*ᵇ*) and the orbit
-/// position reached. The caller invokes this once per pass reusing the same
-/// `buf` and `snapshot`, so only one pass is ever resident, and sorts as a
-/// separate phase so it can be timed independently.
+/// Generates the points of a tradeoff pass, scanning `stream_len` samples
+/// starting from state `snapshot` and keeping the points whose top *b* bits
+/// are equal to `pass`, as in [`run_collision_tradeoff`].
 ///
-/// The key extraction mirrors [`run_collision_tradeoff`]: the pass is selected by
-/// the top *b* bits of the combined index, so pass *k* is one contiguous interval
-/// of the value space.
+/// Returns the number of points written to `buf` and the final state.
 ///
 /// [`run_collision_tradeoff`]: crate::collision::run_collision_tradeoff
 fn gen_pass_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
@@ -662,8 +635,6 @@ fn gen_pass_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL
     let u = params.u;
     let d = params.d;
     let elem_width = if DECIMATE { u - d } else { u };
-    // Pass k holds the points whose top b bits of the combined index equal k
-    // (one contiguous value interval); see run_collision_tradeoff.
     let key_shift = t * elem_width - b;
 
     let key_of = |x: T| -> T {
@@ -690,35 +661,29 @@ fn gen_pass_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL
             len += 1;
         }
     }
-    // local has advanced by exactly stream_len draws regardless of pass
-    // (every pass replays the same snapshot), so it is the orbit position from
-    // which the next repetition should continue.
+    // The final state does not depend on the pass.
     (len, local)
 }
 
-/// The header note describing the null distribution of a collision test with
-/// `points` points on `cells` cells: empty in the sparse (Poisson) regime,
-/// otherwise the variance of the normal approximation.
+/// Returns the header note on the null distribution of a collision test: empty
+/// for a Poisson null distribution, and otherwise the approximation and the
+/// variance.
 pub(crate) fn null_desc(points: usize, cells: f64) -> String {
     let null = Null::collisions(points as f64, cells);
-    if null.normal {
-        format!(" (normal approximation, variance: {})", null.var)
-    } else {
-        String::new()
+    match null.kind() {
+        NullKind::Poisson => String::new(),
+        NullKind::Binomial => format!(" (binomial approximation, variance: {})", null.var),
+        NullKind::Normal => format!(" (normal approximation, variance: {})", null.var),
     }
 }
 
-/// Null distribution of the count of a test that examined `points` points on
-/// `cells` cells: [`Null::collisions`] for the collision test (Poisson, or
-/// normal when the variance-to-mean ratio falls below
-/// [`VARIANCE_RATIO_LIMIT`]), Poisson with mean points³/(4 · cells) for
-/// birthday spacings. Used both a priori (nominal point count, for the header
-/// line and the default sizing) and per repetition, conditioned on the points
-/// actually kept, identical to the a-priori value except under decimation,
-/// where the kept count is random and conditioning avoids overdispersing the
-/// null distribution.
+/// Returns the null distribution of a test with `points` points on `cells`
+/// cells: [`Null::collisions`] for the collision test, and a Poisson
+/// distribution with mean points³/(4 · cells) for birthday spacings.
 ///
-/// [`VARIANCE_RATIO_LIMIT`]: crate::stats::VARIANCE_RATIO_LIMIT
+/// It is used both with the nominal number of points (header line and default
+/// sizing) and with the number of points actually kept, which differs only
+/// under decimation.
 pub fn test_null(points: usize, cells: f64, birthday_spacings: bool) -> Null {
     if birthday_spacings {
         // TestU01 long guide: lambda = n³ / (4k).
@@ -728,18 +693,14 @@ pub fn test_null(points: usize, cells: f64, birthday_spacings: bool) -> Null {
     }
 }
 
-/// Computes the expected count (the mean of the null distribution) and the point
-/// count to use, applying the test-specific defaults.
+/// Returns the expected count (the mean of the null distribution) and the
+/// number of points, applying the defaults of each test.
 pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
-    // cells is already the effective cell count: main() computes it as
-    // (2ᵘ⁻ᵈ)ᵗ, incorporating any whole-tuple decimation.
+    // cells is (2ᵘ⁻ᵈ)ᵗ, so it takes decimation into account.
     let effective_cells_f64 = cells.to_f64().unwrap();
 
-    // In tradeoff mode the user-supplied m is the per-pass memory; the actual
-    // number of points is m · 2ᵇ, where b is the total number of top tradeoff
-    // bits of the combined index (the partition has 2ᵇ contiguous value intervals).
-    // Decimation and the other modes use m as-is. Use a checked shift so an
-    // out-of-range product is reported.
+    // With tradeoff, m is the memory per pass, and the number of points is
+    // m · 2ᵇ.
     let pass_factor = match args.tradeoff_bits {
         Some(b) => 1usize.checked_shl(b as u32).expect("2ᵇ overflows usize"),
         None => 1,
@@ -750,9 +711,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
         // TestU01 long guide p. 133: choose points to maximise birthday-spacings power.
         let max_points = (effective_cells_f64.powf(5.0 / 12.0)
             / (2.0 * args.reps as f64).powf(1.0 / 3.0)) as usize;
-        // With a tradeoff, m is the per-class/per-interval memory and the total
-        // point count is m · 2ᵇ (only ~points / 2ᵇ are ever resident), mirroring
-        // the collision tradeoff; without one, pass_factor is 1 and points = m.
+        // As for collisions, the number of points is m · 2ᵇ.
         let m = args.m.unwrap_or(max_points / pass_factor.max(1));
         points = m.checked_mul(pass_factor).unwrap_or_else(|| {
             Args::die("the number of points m · 2ᵇ overflows the address space (reduce m or b)")
@@ -765,10 +724,9 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
         }
         test_null(points, effective_cells_f64, true)
     } else {
-        // The default number of points is ⌊VARIANCE_MAXIMIZING_DENSITY · cells⌋,
-        // split across the 2ᵇ passes. Cap the default m so that m · 2ᵇ always
-        // fits a usize; an explicit, too-large m still fails the checked
-        // multiplication below, but as a clean CLI error rather than a panic.
+        // By default, ⌊VARIANCE_MAXIMIZING_DENSITY · cells⌋ points split across
+        // the 2ᵇ passes, capped so that m · 2ᵇ fits a usize (an explicit, too
+        // large m fails the checked multiplication below).
         let m_cap = usize::MAX / pass_factor;
         let m_max_var =
             (VARIANCE_MAXIMIZING_DENSITY * effective_cells_f64 / pass_factor as f64).floor();
@@ -782,10 +740,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
             Args::die("the number of points m · 2ᵇ overflows the address space (reduce m or b)")
         });
 
-        // In the dense regime the count is approximated by a normal
-        // distribution (see VARIANCE_RATIO_LIMIT); we allow densities up to MAX_DENSITY,
-        // just above the density ≈ 1.256431 that maximizes the variance of the
-        // number of collisions (the root of e^α = 1 + 2α).
+        // Densities slightly above the one maximizing the variance are allowed.
         if points as f64 > MAX_DENSITY * effective_cells_f64 {
             Args::die(&format!(
                 "more points ({}) than {} times the number of {}cells ({})",
@@ -811,18 +766,18 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
     (null.mean, points)
 }
 
-/// Runs the test sequentially, dispatching the hot loop's const generics once per
-/// test.
+/// Runs a test sequentially.
 ///
-/// The cell type `T` is chosen by the caller (`dispatch` in `main`). Here we pick:
-/// - `DIM` (the dimension *t*): *t* = 1..=8 is monomorphized so the draw loop
-///   unrolls; larger *t* uses the `DIM = 0` runtime fallback.
-/// - `DECIMATE` (*d* > 0) and `FULL` (*u* = 64 and *s* = 0): one-time
-///   branches selecting the specialized [`cell_index`] instantiation.
+/// Returns the total number of collisions and the sum of the null
+/// distributions of the repetitions, each conditioned on the number of points
+/// actually kept (which differs from `points` only under decimation).
 ///
-/// Returns the total collision count and the summed per-repetition Poisson
-/// means, each conditioned on the points the repetition actually kept
-/// (identical to `lambda * reps` when not decimating).
+/// # Implementation Details
+///
+/// The specialization of the runner is chosen once per test: `DIM` is the
+/// dimension *t* if *t* ≤ 8, so that the draw loop can be unrolled, and zero
+/// otherwise; `DECIMATE` is true if *d* > 0; `FULL` is true if *u* = 64 and
+/// *s* = 0 (see [`cell_index`]).
 ///
 /// [`cell_index`]: crate::cell::cell_index
 pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f64) -> (u128, Null) {
@@ -833,14 +788,12 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
 
     let d = args.decimation_bits.unwrap_or(0);
     let tradeoff_b = args.tradeoff_bits(); // tradeoff bits b (0 when absent)
-    // Fixed-sample model: a pass scans scan_len = points · 2ᵗᵈ samples and
-    // keeps the accepted (decimation) and key-matching (tradeoff) subset. Buffer
-    // headroom is the balls-into-bins bound over the t·d + b selectivity bits.
+    // A pass scans points · 2ᵗᵈ samples, and keeps those selected by the
+    // t · d + b bits of decimation and tradeoff.
     let partition_bits = args.t * d + tradeoff_b;
     let scan_len = scan_samples(points, args.t, d);
-    // The birthday tradeoff accumulates one spacing-class (~points / 2ᵇ spacings)
-    // in this buffer and keeps each value-interval points in an internal scratch;
-    // every other mode fills this buffer directly from the sample scan.
+    // The birthday tradeoff uses this buffer for the spacings of a class, and
+    // allocates internally a buffer for the points of an interval.
     let buf_len = if args.birthday_spacings && tradeoff_b > 0 {
         buffer_size(points, tradeoff_b)
     } else {
@@ -883,9 +836,8 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         points,
         size_of::<T>() * 8,
         points >> tradeoff_b,
-        // In f64: an extreme configuration can make the byte count overflow a
-        // usize product (the allocation itself fails cleanly later, in
-        // alloc_mmap), but the header should still print.
+        // In floating point, as the size in bytes might overflow a usize (in
+        // which case alloc_mmap will fail later).
         buf_len as f64 * size_of::<T>() as f64 / 2.0f64.powi(30),
         headroom_suffix,
         mode_suffix
@@ -920,7 +872,7 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
     let full = args.u == 64 && args.s == 0;
     let decimating = d > 0;
 
-    // cells already incorporates decimation (see main()), so no further shift.
+    // cells already takes decimation into account.
     let effective_cells_f64 = cells.to_f64().unwrap();
 
     let mut sw = Stopwatch::new();
@@ -1055,16 +1007,14 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
         };
 
         tot += c as u128;
-        // Condition the Poisson mean on the points actually examined: identical
-        // to the a-priori lambda except under decimation, where the kept count
-        // is random and conditioning avoids overdispersion.
+        // Condition the null distribution on the points actually kept, whose
+        // number is random under decimation, to avoid overdispersion.
         let null_rep = test_null(used, effective_cells_f64, args.birthday_spacings);
         null_sum += null_rep;
         if args.pass.is_some() {
-            // Single-pass mode: `used` is one unit's share of the points, so a
-            // Poisson mean conditioned on it does not match the unit's count
-            // distribution; the recombinable count/λ-share pair is printed by
-            // main. Report the raw counts only.
+            // With --pass, used is the number of points of one pass, so a
+            // p-value would be meaningless: main prints the count and the share
+            // of the null distribution.
             if args.reps > 1 {
                 eprintln!("{c}\tcombined: {tot}");
             } else {
@@ -1090,11 +1040,9 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
 mod prescan_tests {
     use super::*;
 
-    // incr has analytic state: next_u64 does x += 1 then returns x, so a
-    // generator seeded at seed reaches state x = seed + n after n steps and its
-    // next output is seed + n + 1. That lets us verify prescan_checkpoints landed
-    // each snapshot exactly where a jump-by-(boundary*t) would, with a
-    // hand-computed ground truth (no try_skip in the assertions).
+    // Tests that prescan_checkpoints returns the states at the boundaries,
+    // using the fact that after n steps the next output of incr is
+    // seed + n + 1.
     #[test]
     fn test_prescan_lands_at_jump_targets() {
         let seed = 0x1234_5678_9abc_def0u64;
@@ -1118,18 +1066,16 @@ mod prescan_tests {
     }
 }
 
-// Pure compaction (no PRNG): every block's destination is the prefix sum of the
-// used counts, so the result is exactly the concatenation of the kept prefixes.
+// Tests of compact_blocks (no generator is involved).
 #[cfg(test)]
 mod compact_tests {
     use super::*;
 
-    /// Lay sentinel-padded blocks into a buffer of capacity `Σ caps`, run
-    /// `compact_blocks`, and check the kept prefixes come out concatenated.
+    /// Checks that compact_blocks concatenates the used prefixes of the
+    /// regions.
     fn check(caps: &[usize], used: &[usize]) {
         let cap_total: usize = caps.iter().sum();
-        // Each kept slot of block i carries a unique value (i*1000 + j); padding
-        // and trailing gap carry a distinguishable sentinel.
+        // Used elements are distinct, and the others are u64::MAX.
         let mut buf = vec![u64::MAX; cap_total];
         let mut base = 0usize;
         let mut expected: Vec<u64> = Vec::new();

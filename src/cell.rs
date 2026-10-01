@@ -4,15 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! The [`Cell`] trait abstracts over the integer types used to store cell indices
-//! (`u32`, `u64`, `u128`) for the collision and birthday-spacings tests.
+//! Cell indices.
+//!
+//! The [`Cell`] trait abstracts over the integer types (`u32`, `u64`, and
+//! `u128`) used to store cell indices, and [`cell_index`] and
+//! [`decimate_once`] draw cell indices from a generator.
 
 use voracious_radix_sort::{RadixSort, ska_sort};
 
 use crate::prng::Prng;
 use crate::util::parallelism;
 
-/// Storage and operations required for a cell-index integer type.
+/// An integer type that can store cell indices.
 pub trait Cell:
     Copy
     + Eq
@@ -33,9 +36,12 @@ pub trait Cell:
     fn from_u64(x: u64) -> Self;
     fn from_u128(x: u128) -> Self;
 
-    /// Mask of the low *b* bits, saturating to all-ones when *b* reaches the type width.
-    /// Used by the birthday spacing-count level, which keys on the low bits of the
-    /// spacing (balanced, unlike the top bits which cluster near zero).
+    /// Returns a mask of the lowest *b* bits (all ones if *b* is at least the
+    /// width of the type).
+    ///
+    /// The counting level of the birthday-spacings tradeoff classifies spacings
+    /// by their low bits, as spacings cluster near zero, so their top bits are
+    /// unbalanced.
     fn low_bits_mask(b: usize) -> Self;
 
     /// Sorts `v` in place using a multithreaded radix sort.
@@ -70,12 +76,9 @@ macro_rules! impl_cell {
                 v.voracious_mt_sort(parallelism());
             }
             fn sort_st(v: &mut [Self]) {
-                // In-place American-flag (MSD) radix sort. Unlike voracious_sort,
-                // which dispatches to the diverting-LSD dlsd_radixsort and allocates
-                // a full size-n scratch buffer, ska_sort permutes within v using
-                // only O(radix-range) bookkeeping. This matters in parallel tradeoff
-                // mode, where num_cpus threads each sort concurrently: an out-of-place
-                // sort would double peak RSS (mmap buffers + per-thread scratch).
+                // In-place MSD radix sort: unlike voracious_sort, it does not
+                // allocate a scratch buffer as large as v, which would double
+                // the peak memory usage.
                 ska_sort(v, 8);
             }
         }
@@ -86,18 +89,17 @@ impl_cell!(u32, 32);
 impl_cell!(u64, 64);
 impl_cell!(u128, 128);
 
-/// Draws a single (non-decimated) cell index from `prng`.
+/// Returns a cell index drawn from `prng`, without decimation.
 ///
-/// The index concatenates *t* chunks of *u* bits taken from the top of
-/// [`next_u64()`] (after a left shift by *s*), combined left-to-right with
-/// XOR-shifts. Decimation is handled separately by [`decimate_once`].
+/// The index is the concatenation of *t* chunks of *u* bits, each taken from
+/// the top of an output of [`next_u64()`] shifted left by *s*. Decimation is
+/// handled by [`decimate_once`].
 ///
-/// Const generics select hot-loop specializations (see the design spec):
-/// - `DIM`: the dimension *t*. `DIM > 0` makes the trip count a compile-time
-///   constant so the draw loop unrolls; `DIM == 0` falls back to the runtime
-///   *t* argument.
-/// - `FULL`: when true (*u* = 64 and *s* = 0) the extraction is a
-///   compile-time identity.
+/// # Implementation Details
+///
+/// If `DIM` is nonzero, it is used as the dimension *t* in place of `t_rt`, so
+/// that the loop can be unrolled. `FULL` can be true only if *u* = 64 and
+/// *s* = 0, in which case the extraction is the identity.
 ///
 /// [`next_u64()`]: crate::prng::Prng::next_u64
 #[inline]
@@ -137,13 +139,14 @@ pub fn cell_index<T: Cell, const DIM: usize, const FULL: bool>(
     x
 }
 
-/// One decimating attempt: draws exactly *t* PRNG outputs (a full candidate
-/// tuple) and returns `Some(x)`, with `x` the assembled dense index (each element
-/// compacted to *u* − *d* bits), iff every element's low *d* bits are zero; else
-/// `None`. The full tuple's *t* draws are always consumed, accepted or rejected,
-/// so the generator advances by exactly *t* and sample *j* sits at orbit offset
-/// *j* · *t*. This is the fixed-sample counterpart to the loop-until-accept path:
-/// the caller scans a fixed number of samples and keeps the `Some` values.
+/// Draws a candidate tuple from `prng` and returns its decimated cell index, or
+/// `None` if the tuple is rejected.
+///
+/// The tuple is accepted if the lowest *d* bits of all its elements are zero,
+/// and in this case the index is the concatenation of the elements without
+/// their lowest *d* bits. Exactly *t* outputs are drawn in both cases, so
+/// sample *j* starts at offset *j* · *t* of the orbit, which makes jump-ahead
+/// possible. See [`cell_index`] for the other parameters.
 #[inline]
 pub fn decimate_once<T: Cell, const DIM: usize, const FULL: bool>(
     prng: &mut Prng,
@@ -185,11 +188,9 @@ mod tests {
     use super::*;
     use crate::prng::Prng;
 
-    // decimate_once consumes exactly t draws per call (accepted or rejected),
-    // returns Some only when every element's low d bits are zero, and the dense
-    // index is in [0, (2ᵘ⁻ᵈ)ᵗ). Both arms must be exercise, which needs a
-    // non-degenerate generator (the incr counter maps everything to ~cell 0, so it
-    // never rejects), hence the gate.
+    // Tests that decimate_once draws exactly t outputs, whether it accepts or
+    // not, and that accepted indices are smaller than (2ᵘ⁻ᵈ)ᵗ. The incr
+    // generator is excluded because both outcomes must occur.
     #[cfg(not(feature = "incr"))]
     #[test]
     fn test_decimate_once_consumes_t_draws_and_is_dense() {
@@ -200,8 +201,7 @@ mod tests {
         for _ in 0..50_000 {
             let b = a; // Copy: capture position before the attempt
             let got: Option<u128> = decimate_once::<u128, 3, false>(&mut a, 0, u, s, d);
-            // A reference advanced by exactly t draws must be at the same position:
-            // compare the next outputs of throwaway clones (does not disturb a).
+            // b advanced by t outputs must be in the same state as a.
             let mut aref = b;
             for _ in 0..t {
                 aref.next_u64();
@@ -228,8 +228,7 @@ mod tests {
         );
     }
 
-    // (Decimation density is covered by test_decimate_once_consumes_t_draws_and_is_dense.)
-
+    // A nonzero DIM must give the same indices as the runtime t.
     #[test]
     fn test_dim_specialization_matches_runtime_fallback() {
         let (u, s) = (12usize, 0usize);
@@ -242,6 +241,7 @@ mod tests {
         }
     }
 
+    // FULL must give the same indices as the shift-and-mask extraction.
     #[test]
     fn test_full_matches_shift_when_u_is_64() {
         let (u, s) = (64usize, 0usize);

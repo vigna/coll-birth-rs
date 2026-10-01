@@ -1,5 +1,21 @@
 # Change Log
 
+## [0.3.1] - 2026-10-01
+
+### Fixed
+
+- The normal approximation introduced in 0.3.0 underestimated right tails
+  (by a factor of up to 50 at six standard deviations) when the expected
+  number of collisions is small. Collision tests whose variance is between 54%
+  and 99% of the mean (density up to ≈ 0.46) now use a binomial approximation
+  with the same mean and variance; the run header reports the approximation
+  used. Sparse tests are unaffected.
+
+### Changed
+
+- `Null` now holds only the mean and the variance; the approximation is chosen
+  when computing tails (`Null::kind`, `stats::null_tails`).
+
 ## [0.3.0] - 2026-09-29
 
 ### New

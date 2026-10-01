@@ -11,14 +11,9 @@
 //! a `next_u64(&mut self) -> u64` step function, and a `try_skip(&mut self, n:
 //! u64) -> Result<(), ()>` method to skip ahead by `n` steps.
 //!
-//! `try_skip(n)` must advance the state exactly as `n` calls to `next_u64`
-//! would. Moreover, its outcome must *not* depend on `n`: a generator either
-//! supports jumping ahead, in which case `try_skip` must succeed for every `n`
-//! (including 0), or it does not, in which case `try_skip` must return an
-//! error for every `n` (including 0) and leave the state unchanged. The
-//! parallel runners probe the capability once with `try_skip(0)` and then rely
-//! on it for arbitrary offsets, so, for example, implementing `try_skip(0)` as
-//! a successful no-op while failing for `n` > 0 would make them panic.
+//! `try_skip(n)` must have the same effect as `n` calls to `next_u64`. It must
+//! succeed for every `n`, or fail for every `n` (including 0) without changing
+//! the state: the parallel runners probe the capability with `try_skip(0)`.
 //!
 //! Generators outputting less than 64 bits must shift their outputs to the top
 //! (e.g., 32-bit generators must return their output shifted to the left by 32).

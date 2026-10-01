@@ -24,13 +24,11 @@ pub struct Args {
     pub t: usize,
 
     /// Number of memory locations: the number of points is m · 2ᵇ (approximate
-    /// when decimating), the number of samples is m · 2ᵇ · 2ᵗᵈ, and the number
-    /// of calls to the generator is t · m · (2ᵇ)² · 2ᵗᵈ (the birthday-spacings
-    /// test adds a further factor of 2ᵇ for its second level); if omitted (not
-    /// allowed when decimating), the number of points is ⌊1.256431 · k⌋ for the
-    /// collision test on k cells (the density maximizing the variance of the
-    /// number of collisions), and ⌊k⁵ᐟ¹² / (2r)¹ᐟ³⌋ for the birthday-spacings
-    /// test with r repetitions (TestU01).​
+    /// when decimating), and the number of calls to the generator is t · m ·
+    /// (2ᵇ)² · 2ᵗᵈ (t · m · (2ᵇ)³ · 2ᵗᵈ for birthday spacings); by default, the
+    /// number of points is ⌊1.256431 · k⌋ for collisions on k cells and
+    /// ⌊k⁵ᐟ¹² / (2r)¹ᐟ³⌋ for birthday spacings with r repetitions (required
+    /// when decimating).​
     pub m: Option<usize>,
 
     /// Left-shift the PRNG output by this many bits before extracting cell indices.​
@@ -81,10 +79,10 @@ pub struct Args {
     #[arg(short = 'P', long)]
     pub parallel: bool,
 
-    /// Run only one of the 2ᵇ tradeoff units (0-based) and print its raw count and
-    /// its λ share (and, in the dense normal regime, its variance share), so the
-    /// 2ᵇ units can be distributed across invocations and recombined; collision:
-    /// value-interval K; birthday: spacing-class K; requires -b.​
+    /// Run only tradeoff unit K (0-based: a value interval for collisions, a
+    /// spacing class for birthday spacings) and print its count and its share of
+    /// the null distribution, so that units can be run separately and
+    /// recombined; requires -b.​
     #[arg(long, value_name = "K")]
     pub pass: Option<u64>,
 }
