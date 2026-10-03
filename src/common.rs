@@ -708,7 +708,8 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
 
     let points;
     let null = if args.birthday_spacings {
-        // TestU01 long guide p. 133: choose points to maximise birthday-spacings power.
+        // The largest number of points allowed by TestU01 (8rλ ≤ k¹ᐟ⁴; long guide,
+        // p. 132).
         let max_points = (effective_cells_f64.powf(5.0 / 12.0)
             / (2.0 * args.reps as f64).powf(1.0 / 3.0)) as usize;
         // As for collisions, the number of points is m · 2ᵇ.
