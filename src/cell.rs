@@ -189,7 +189,7 @@ mod tests {
     use crate::prng::Prng;
 
     // Tests that decimate_once draws exactly t outputs, whether it accepts or
-    // not, and that accepted indices are smaller than (2ᵘ⁻ᵈ)ᵗ. The incr
+    // not, and that accepted indices lie in [0 . . (2ᵘ⁻ᵈ)ᵗ). The incr
     // generator is excluded because both outcomes must occur.
     #[cfg(not(feature = "incr"))]
     #[test]

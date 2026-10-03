@@ -82,7 +82,7 @@ pub fn run_birthday<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL:
 /// Each element is replaced by its difference with its predecessor, and the
 /// first element by the wrap-around spacing `cells` − max + min.
 ///
-/// The wrap-around spacing is at most `cells`, which might not be
+/// The wrap-around spacing lies in \[1 . . `cells`\], so it might not be
 /// representable (e.g., 2⁶⁴ cells in a `u64`), and it is equal to `cells` only
 /// if min = max. Thus, it is computed through `cells` − 1, and in the
 /// degenerate case it is replaced by a nonzero value: since all other spacings

@@ -258,13 +258,14 @@ possible distance, to which one associates a large _figure of merit_. A large
 body of research has studied spectral scores, and studied how to obtain
 multipliers with large figures of merit.
 
-Much less known is that figures of merit have nothing to do with the randomness of
-the output of the generator—they just describe its _uniformity_. If a multiplier
-is not uniform enough, it will fail a collision test because too many outputs end
-up in the same cell.
+Much less known is that figures of merit have little to do with the randomness
+of the output of the generator—they describe its _uniformity_. If a multiplier
+is mediocre, outputs cluster, and the generator fails a collision test because
+too many outputs end up in the same cell.
 
-However, if you can run large-scale collision test, a multiplier that is _too
-good_ will fail, too, as the hyperplanes are still there:
+However, if you can run a large-scale collision test, a good multiplier will
+fail, too: its outputs are spread _more evenly_ than random outputs would be, so
+there are too few collisions:
 
 ```text
 cargo run -r -F lcg_64_64_0xa5b9ee81534fa94d -- 32 2 8000000000 -b 3 -p -P
@@ -285,9 +286,14 @@ Test completed in 353.10 seconds
 The multiplier, for 64-bit ACGs with 64 bits of state, has been found during the
 large-scale search that [Guy Steele and I conducted to improve spectral
 coefficients]. Its *f*₂ figure of merit is a whopping 0.977689—almost perfect.
-As a result, the generator fails catastrophically to reproduce the right number
-of collisions for pairs of consecutive outputs. Note that without space-time
-tradeoffs the test would require half a terabyte of RAM.
+Nonetheless, the generator fails catastrophically to reproduce the right number
+of collisions for pairs of consecutive outputs: 16 instead of 111. Note that without
+space-time tradeoffs the test would require half a terabyte of RAM.
+
+This observation is not new: L'Ecuyer, Simard, and Wegenkittl [report similar
+considerations], but their generators have a period of at most about 2⁴⁰ (and
+their published collision tests stop at 2³⁰), whereas we can test a realistic
+generator.
 
 # Example: multiply-with-carry generators
 
@@ -339,3 +345,4 @@ stimulated me to investigate space-time tradeoffs and publish this crate.
 [_space-time tradeoffs_]: https://doi.org/10.1137/0220017
 [TestU01]: https://doi.org/10.1145/1268776.1268777
 [Alexey Voskov]: https://github.com/alvoskov
+[report similar considerations]: https://doi.org/10.1137/S1064827598349033

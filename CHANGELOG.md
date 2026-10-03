@@ -11,6 +11,10 @@
   with the same mean and variance; the run header reports the approximation
   used. Sparse tests are unaffected.
 
+- `--pass` is now incompatible with `-d`: under decimation the null
+  distribution depends on the total number of points kept, so the share of a
+  single pass cannot be computed.
+
 ### Changed
 
 - `Null` now holds only the mean and the variance; the approximation is chosen

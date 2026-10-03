@@ -82,8 +82,8 @@ pub struct Args {
     /// Run only tradeoff unit K (0-based: a value interval for collisions, a
     /// spacing class for birthday spacings) and print its count and its share of
     /// the null distribution, so that units can be run separately and
-    /// recombined; requires -b.​
-    #[arg(long, value_name = "K")]
+    /// recombined; requires -b, and is incompatible with -d.​
+    #[arg(long, value_name = "K", conflicts_with = "decimation_bits")]
     pub pass: Option<u64>,
 }
 
