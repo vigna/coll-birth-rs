@@ -39,6 +39,14 @@ jobs:
           - mwc_192_64_0xffa04e67b3c95d86
           - mwc_256_64_0xfff62cf2ccc0cdaf
           - mwc_128_32_0xfffea2df
+          - mwc_128_64_0xff6da236274e252e
+          - mwc_192_64_0xff4e24dd418f5433
+          - mwc_256_64_0xff32e7e2bdcb0a33
+          - mwc_128_32_0xffcccc66
+          - "mwc_128_64_0xff6da236274e252e,MWCX"
+          - "mwc_192_64_0xff4e24dd418f5433,MWCX"
+          - "mwc_256_64_0xff32e7e2bdcb0a33,MWCX"
+          - "mwc_128_32_0xffcccc66,MWCX"
           - splitmix
           - incr
           - wyrand
@@ -73,6 +81,14 @@ jobs:
           - mwc_192_64_0xffa04e67b3c95d86
           - mwc_256_64_0xfff62cf2ccc0cdaf
           - mwc_128_32_0xfffea2df
+          - mwc_128_64_0xff6da236274e252e
+          - mwc_192_64_0xff4e24dd418f5433
+          - mwc_256_64_0xff32e7e2bdcb0a33
+          - mwc_128_32_0xffcccc66
+          - "mwc_128_64_0xff6da236274e252e,MWCX"
+          - "mwc_192_64_0xff4e24dd418f5433,MWCX"
+          - "mwc_256_64_0xff32e7e2bdcb0a33,MWCX"
+          - "mwc_128_32_0xffcccc66,MWCX"
           - splitmix
           - incr
           - wyrand

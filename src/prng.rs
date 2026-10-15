@@ -17,6 +17,11 @@
 //!
 //! Generators outputting less than 64 bits must shift their outputs to the top
 //! (e.g., 32-bit generators must return their output shifted to the left by 32).
+//!
+//! The `MWCX` feature, which must be combined with an MWC feature, applies the
+//! scrambler X to the output of the MWC generator: the output digit is xored
+//! with the carry of the same state (as in Thomas's MWC64X), and the name of
+//! the generator gets an `X` suffix.
 
 // When no PRNG feature is selected, the _prng marker (enabled by every PRNG
 // feature in Cargo.toml) is off. Emit one clear error AND expose a placeholder Prng
@@ -49,11 +54,15 @@ mod placeholder {
 #[cfg(not(feature = "_prng"))]
 pub use placeholder::Prng;
 
+#[cfg(all(feature = "MWCX", not(feature = "_mwc")))]
+compile_error!("the MWCX feature applies only to MWC generators: combine it with an mwc_* feature");
+
 // ----- Multiply-with-carry family -----------------------------------------------------
 
 #[cfg(any(
     feature = "mwc_128_64_0xff96d28c3f3329da",
-    feature = "mwc_128_64_0xffebb71d94fcdaf9"
+    feature = "mwc_128_64_0xffebb71d94fcdaf9",
+    feature = "mwc_128_64_0xff6da236274e252e"
 ))]
 macro_rules! mwc_128_64 {
     ($a1:expr) => {
@@ -66,7 +75,11 @@ macro_rules! mwc_128_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = concat!("MWC128 (", stringify!($a1), ")");
+            pub const NAME: &str = if cfg!(feature = "MWCX") {
+                concat!("MWC128X (", stringify!($a1), ")")
+            } else {
+                concat!("MWC128 (", stringify!($a1), ")")
+            };
 
             pub fn new(seed: u64) -> Self {
                 Self { x: seed, c: 1 }
@@ -74,7 +87,11 @@ macro_rules! mwc_128_64 {
 
             #[inline(always)]
             pub fn next_u64(&mut self) -> u64 {
-                let result = self.x;
+                let result = if cfg!(feature = "MWCX") {
+                    self.x ^ self.c
+                } else {
+                    self.x
+                };
                 let t = (MWC_A1 as u128)
                     .wrapping_mul(self.x as u128)
                     .wrapping_add(self.c as u128);
@@ -101,7 +118,10 @@ macro_rules! mwc_128_64 {
     };
 }
 
-#[cfg(feature = "mwc_192_64_0xffa04e67b3c95d86")]
+#[cfg(any(
+    feature = "mwc_192_64_0xffa04e67b3c95d86",
+    feature = "mwc_192_64_0xff4e24dd418f5433"
+))]
 macro_rules! mwc_192_64 {
     ($a2:expr) => {
         const MWC_A2: u64 = $a2;
@@ -114,7 +134,11 @@ macro_rules! mwc_192_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = concat!("MWC192 (", stringify!($a2), ")");
+            pub const NAME: &str = if cfg!(feature = "MWCX") {
+                concat!("MWC192X (", stringify!($a2), ")")
+            } else {
+                concat!("MWC192 (", stringify!($a2), ")")
+            };
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -126,7 +150,11 @@ macro_rules! mwc_192_64 {
 
             #[inline(always)]
             pub fn next_u64(&mut self) -> u64 {
-                let result = self.y;
+                let result = if cfg!(feature = "MWCX") {
+                    self.y ^ self.c
+                } else {
+                    self.y
+                };
                 let t = (MWC_A2 as u128)
                     .wrapping_mul(self.x as u128)
                     .wrapping_add(self.c as u128);
@@ -157,7 +185,10 @@ macro_rules! mwc_192_64 {
     };
 }
 
-#[cfg(feature = "mwc_256_64_0xfff62cf2ccc0cdaf")]
+#[cfg(any(
+    feature = "mwc_256_64_0xfff62cf2ccc0cdaf",
+    feature = "mwc_256_64_0xff32e7e2bdcb0a33"
+))]
 macro_rules! mwc_256_64 {
     ($a3:expr) => {
         const MWC_A3: u64 = $a3;
@@ -171,7 +202,11 @@ macro_rules! mwc_256_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = concat!("MWC256 (", stringify!($a3), ")");
+            pub const NAME: &str = if cfg!(feature = "MWCX") {
+                concat!("MWC256X (", stringify!($a3), ")")
+            } else {
+                concat!("MWC256 (", stringify!($a3), ")")
+            };
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -184,7 +219,11 @@ macro_rules! mwc_256_64 {
 
             #[inline(always)]
             pub fn next_u64(&mut self) -> u64 {
-                let result = self.z;
+                let result = if cfg!(feature = "MWCX") {
+                    self.z ^ self.c
+                } else {
+                    self.z
+                };
                 let t = (MWC_A3 as u128)
                     .wrapping_mul(self.x as u128)
                     .wrapping_add(self.c as u128);
@@ -218,7 +257,7 @@ macro_rules! mwc_256_64 {
     };
 }
 
-#[cfg(feature = "mwc_128_32_0xfffea2df")]
+#[cfg(any(feature = "mwc_128_32_0xfffea2df", feature = "mwc_128_32_0xffcccc66"))]
 macro_rules! mwc_128_32 {
     ($a3:expr) => {
         const MWC_A3: u32 = $a3;
@@ -232,7 +271,11 @@ macro_rules! mwc_128_32 {
         }
 
         impl Prng {
-            pub const NAME: &str = concat!("MWC128-32 (", stringify!($a3), ")");
+            pub const NAME: &str = if cfg!(feature = "MWCX") {
+                concat!("MWC128-32X (", stringify!($a3), ")")
+            } else {
+                concat!("MWC128-32 (", stringify!($a3), ")")
+            };
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -245,7 +288,11 @@ macro_rules! mwc_128_32 {
 
             #[inline(always)]
             pub fn next_u64(&mut self) -> u64 {
-                let result = (self.z as u64) << 32;
+                let result = if cfg!(feature = "MWCX") {
+                    ((self.z ^ self.c) as u64) << 32
+                } else {
+                    (self.z as u64) << 32
+                };
                 let t = (MWC_A3 as u64)
                     .wrapping_mul(self.x as u64)
                     .wrapping_add(self.c as u64);
@@ -298,6 +345,21 @@ mwc_256_64!(0xfff62cf2ccc0cdaf);
 #[cfg(feature = "mwc_128_32_0xfffea2df")]
 // Unique value quantile 0.972656
 mwc_128_32!(0xfffea2df);
+
+// Multipliers suggested in "Spectrally good multipliers for multiply-with-carry
+// generators" (best weighted geometric mean of the figures of merit)
+
+#[cfg(feature = "mwc_128_64_0xff6da236274e252e")]
+mwc_128_64!(0xff6da236274e252e);
+
+#[cfg(feature = "mwc_192_64_0xff4e24dd418f5433")]
+mwc_192_64!(0xff4e24dd418f5433);
+
+#[cfg(feature = "mwc_256_64_0xff32e7e2bdcb0a33")]
+mwc_256_64!(0xff32e7e2bdcb0a33);
+
+#[cfg(feature = "mwc_128_32_0xffcccc66")]
+mwc_128_32!(0xffcccc66);
 
 // ----- SplitMix -------------------------------------------------------------------
 

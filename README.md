@@ -218,6 +218,14 @@ Test completed in 465.96 seconds
 0	p=1 − 8.828901494125378e-13
 ```
 
+The `MWCX` feature can be combined with any MWC generator feature to apply the
+scrambler X, which xors the output digit with the carry of the same state, as
+in Thomas's MWC64X:
+
+```text
+cargo run -r -F mwc_192_64_0xff4e24dd418f5433,MWCX -- 36 3 -B -P
+```
+
 # Adding your own generator
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding

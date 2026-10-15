@@ -37,16 +37,26 @@ codegen-units = 1
 
 # Each feature corresponds to a PRNG defined in the prng module. Every PRNG feature
 # enables the internal `_prng` marker, which lets the build emit a single clear error
-# (rather than a cascade of unresolved-`Prng` errors) when none is selected. Do not
-# enable `_prng` directly.
+# (rather than a cascade of unresolved-`Prng` errors) when none is selected. MWC
+# features also enable the internal `_mwc` marker, so that `MWCX` can check that an
+# MWC generator is selected. Do not enable `_prng` or `_mwc` directly.
+#
+# MWCX is not a generator: combined with an MWC feature, it applies the scrambler X
+# (output digit xored with the carry) to its output.
 
 [features]
 _prng = []
-mwc_128_64_0xff96d28c3f3329da = ["_prng"]
-mwc_128_64_0xffebb71d94fcdaf9 = ["_prng"]
-mwc_192_64_0xffa04e67b3c95d86 = ["_prng"]
-mwc_256_64_0xfff62cf2ccc0cdaf = ["_prng"]
-mwc_128_32_0xfffea2df = ["_prng"]
+_mwc = []
+MWCX = []
+mwc_128_64_0xff96d28c3f3329da = ["_prng", "_mwc"]
+mwc_128_64_0xffebb71d94fcdaf9 = ["_prng", "_mwc"]
+mwc_128_64_0xff6da236274e252e = ["_prng", "_mwc"]
+mwc_192_64_0xffa04e67b3c95d86 = ["_prng", "_mwc"]
+mwc_192_64_0xff4e24dd418f5433 = ["_prng", "_mwc"]
+mwc_256_64_0xfff62cf2ccc0cdaf = ["_prng", "_mwc"]
+mwc_256_64_0xff32e7e2bdcb0a33 = ["_prng", "_mwc"]
+mwc_128_32_0xfffea2df = ["_prng", "_mwc"]
+mwc_128_32_0xffcccc66 = ["_prng", "_mwc"]
 splitmix = ["_prng"]
 incr = ["_prng"]
 wyrand = ["_prng"]

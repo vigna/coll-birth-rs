@@ -30,8 +30,10 @@ use crate::util::{Stopwatch, parallelism, superscript};
 ///
 /// [`MmapFlags::POPULATE`] would prefault the buffer as base (4 KiB) pages, so
 /// we use [`MmapFlags::TRANSPARENT_HUGE_PAGES`] and prefault the buffer by
-/// touching one byte every 2 MiB. If transparent huge pages are disabled, the
-/// buffer is still prefaulted, as base pages.
+/// touching one byte every 2 MiB. If transparent huge pages are not available
+/// (e.g., on macOS, or on Linux if they are disabled), this faults in a single
+/// base page every 2 MiB, and the rest of the buffer is faulted in on first
+/// access.
 ///
 /// [`MmapFlags::POPULATE`]: mmap_rs::MmapFlags::POPULATE
 /// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: mmap_rs::MmapFlags::TRANSPARENT_HUGE_PAGES
