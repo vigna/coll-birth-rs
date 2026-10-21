@@ -226,6 +226,16 @@ in Thomas's MWC64X:
 cargo run -r -F mwc_192_64_0xff4e24dd418f5433,MWCX -- 36 3 -B -P
 ```
 
+The `LACUNARY` feature can be combined with any MWC generator feature (and
+with `MWCX`) to test the lacunary triples (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁) of a
+generator with lag *k*: from each block of *k* + 2 consecutive outputs, the
+generator returns those of index 0, 1, and *k* + 1, so a three-dimensional
+test (the only one accepted) builds each point from a lacunary triple:
+
+```text
+cargo run -r -F mwc_192_64_0xff4e24dd418f5433,LACUNARY -- 36 3 -B -P
+```
+
 # Adding your own generator
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding

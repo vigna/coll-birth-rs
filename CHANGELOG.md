@@ -8,10 +8,14 @@
   scrambler X (the output digit xored with the carry of the same state) to the
   output of the generator.
 
-- Features for the MWC multipliers suggested in "Spectrally good multipliers
-  for multiply-with-carry generators": `mwc_128_64_0xff6da236274e252e`,
-  `mwc_192_64_0xff4e24dd418f5433`, `mwc_256_64_0xff32e7e2bdcb0a33`, and
-  `mwc_128_32_0xffcccc66`.
+- The `LACUNARY` feature, combined with an MWC generator feature with lag *k*,
+  makes three-dimensional tests use the lacunary triples
+  (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁) of the generator.
+
+- Features for the MWC multipliers suggested in "Scrambled Multiply-with-Carry
+  Pseudorandom Number Generators" (<https://arxiv.org/abs/2610.27313>):
+  `mwc_128_64_0xff6da236274e252e`, `mwc_192_64_0xff4e24dd418f5433`,
+  `mwc_256_64_0xff32e7e2bdcb0a33`, and `mwc_128_32_0xffcccc66`.
 
 ## [0.3.1] - 2026-10-03
 

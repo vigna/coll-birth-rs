@@ -38,16 +38,21 @@ codegen-units = 1
 # Each feature corresponds to a PRNG defined in the prng module. Every PRNG feature
 # enables the internal `_prng` marker, which lets the build emit a single clear error
 # (rather than a cascade of unresolved-`Prng` errors) when none is selected. MWC
-# features also enable the internal `_mwc` marker, so that `MWCX` can check that an
-# MWC generator is selected. Do not enable `_prng` or `_mwc` directly.
+# features also enable the internal `_mwc` marker, so that `MWCX` and `LACUNARY` can check
+# that an MWC generator is selected. Do not enable `_prng` or `_mwc` directly.
 #
 # MWCX is not a generator: combined with an MWC feature, it applies the scrambler X
-# (output digit xored with the carry) to its output.
+# (output digit xored with the carry) to its output. LACUNARY is not a generator
+# either: combined with an MWC feature with lag *k* (and possibly MWCX), it returns
+# the outputs of index 0, 1, and *k* + 1 of each block of *k* + 2, so that a
+# three-dimensional test (the only one accepted) tests the lacunary triples
+# (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁).
 
 [features]
 _prng = []
 _mwc = []
 MWCX = []
+LACUNARY = []
 mwc_128_64_0xff96d28c3f3329da = ["_prng", "_mwc"]
 mwc_128_64_0xffebb71d94fcdaf9 = ["_prng", "_mwc"]
 mwc_128_64_0xff6da236274e252e = ["_prng", "_mwc"]

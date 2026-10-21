@@ -103,6 +103,14 @@ impl Args {
         if self.u < 1 {
             Self::die("u must be at least 1");
         }
+        // The generator returns lacunary triples: only a three-dimensional test
+        // builds each point from one of them.
+        if cfg!(feature = "LACUNARY") && self.t != 3 {
+            Self::die(&format!(
+                "t ({}) must be 3 with the LACUNARY feature, which returns lacunary triples",
+                self.t
+            ));
+        }
         // Since u - d >= 1, any t > 128 makes the cell count 2^((u-d)·t) exceed
         // 2^128; rejecting it here also keeps the `t as u32` cast in main() and
         // the t·(u - d) product below from silently truncating or wrapping for

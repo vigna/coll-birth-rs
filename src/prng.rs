@@ -22,6 +22,14 @@
 //! scrambler X to the output of the MWC generator: the output digit is xored
 //! with the carry of the same state (as in Thomas's MWC64X), and the name of
 //! the generator gets an `X` suffix.
+//!
+//! The `LACUNARY` feature, which must be combined with an MWC feature (and
+//! possibly with `MWCX`), returns, from each block of *k* + 2 consecutive
+//! outputs of an MWC generator with lag *k*, the outputs of index 0, 1, and
+//! *k* + 1, so that a three-dimensional test (which is the only one accepted)
+//! tests the lacunary triples (*xₙ*, *xₙ*₊₁, *xₙ*₊*ₖ*₊₁), which lie in planes at
+//! a distance similar to that of the successive triples of an MWC generator
+//! with lag one.
 
 // When no PRNG feature is selected, the _prng marker (enabled by every PRNG
 // feature in Cargo.toml) is off. Emit one clear error AND expose a placeholder Prng
@@ -57,7 +65,38 @@ pub use placeholder::Prng;
 #[cfg(all(feature = "MWCX", not(feature = "_mwc")))]
 compile_error!("the MWCX feature applies only to MWC generators: combine it with an mwc_* feature");
 
+#[cfg(all(feature = "LACUNARY", not(feature = "_mwc")))]
+compile_error!(
+    "the LACUNARY feature applies only to MWC generators: combine it with an mwc_* feature"
+);
+
 // ----- Multiply-with-carry family -----------------------------------------------------
+
+// The name of an MWC generator: the base name, followed by X if MWCX is enabled,
+// by the multiplier, and, if LACUNARY is enabled, by the indices of the triples.
+#[cfg(feature = "_mwc")]
+macro_rules! mwc_name {
+    ($base:literal, $a:expr, $lacunary:literal) => {
+        match (cfg!(feature = "MWCX"), cfg!(feature = "LACUNARY")) {
+            (false, false) => concat!($base, " (", stringify!($a), ")"),
+            (true, false) => concat!($base, "X (", stringify!($a), ")"),
+            (false, true) => concat!(
+                $base,
+                " (",
+                stringify!($a),
+                "), lacunary triples ",
+                $lacunary
+            ),
+            (true, true) => concat!(
+                $base,
+                "X (",
+                stringify!($a),
+                "), lacunary triples ",
+                $lacunary
+            ),
+        }
+    };
+}
 
 #[cfg(any(
     feature = "mwc_128_64_0xff96d28c3f3329da",
@@ -75,11 +114,9 @@ macro_rules! mwc_128_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = if cfg!(feature = "MWCX") {
-                concat!("MWC128X (", stringify!($a1), ")")
-            } else {
-                concat!("MWC128 (", stringify!($a1), ")")
-            };
+            pub const NAME: &str = mwc_name!("MWC128", $a1, "(0, 1, 2)");
+            /// The lag *k* of the generator.
+            pub const LAG: u64 = 1;
 
             pub fn new(seed: u64) -> Self {
                 Self { x: seed, c: 1 }
@@ -134,11 +171,9 @@ macro_rules! mwc_192_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = if cfg!(feature = "MWCX") {
-                concat!("MWC192X (", stringify!($a2), ")")
-            } else {
-                concat!("MWC192 (", stringify!($a2), ")")
-            };
+            pub const NAME: &str = mwc_name!("MWC192", $a2, "(0, 1, 3)");
+            /// The lag *k* of the generator.
+            pub const LAG: u64 = 2;
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -202,11 +237,9 @@ macro_rules! mwc_256_64 {
         }
 
         impl Prng {
-            pub const NAME: &str = if cfg!(feature = "MWCX") {
-                concat!("MWC256X (", stringify!($a3), ")")
-            } else {
-                concat!("MWC256 (", stringify!($a3), ")")
-            };
+            pub const NAME: &str = mwc_name!("MWC256", $a3, "(0, 1, 4)");
+            /// The lag *k* of the generator.
+            pub const LAG: u64 = 3;
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -271,11 +304,9 @@ macro_rules! mwc_128_32 {
         }
 
         impl Prng {
-            pub const NAME: &str = if cfg!(feature = "MWCX") {
-                concat!("MWC128-32X (", stringify!($a3), ")")
-            } else {
-                concat!("MWC128-32 (", stringify!($a3), ")")
-            };
+            pub const NAME: &str = mwc_name!("MWC128-32", $a3, "(0, 1, 4)");
+            /// The lag *k* of the generator.
+            pub const LAG: u64 = 3;
 
             pub fn new(seed: u64) -> Self {
                 Self {
@@ -326,40 +357,155 @@ macro_rules! mwc_128_32 {
     };
 }
 
-#[cfg(feature = "mwc_128_64_0xffebb71d94fcdaf9")]
-// Unique value quantile 0.855469, f₃ = 0.000609206
-mwc_128_64!(0xffebb71d94fcdaf9);
+// The MWC generators live in a private module, so that LACUNARY can wrap them.
+#[cfg(feature = "_mwc")]
+mod mwc {
+    #[cfg(feature = "mwc_128_64_0xffebb71d94fcdaf9")]
+    // Unique value quantile 0.855469, f₃ = 0.000609206
+    mwc_128_64!(0xffebb71d94fcdaf9);
 
-#[cfg(feature = "mwc_128_64_0xff96d28c3f3329da")]
-// f₃ = 9.1743e-09
-mwc_128_64!(0xff96d28c3f3329da);
+    #[cfg(feature = "mwc_128_64_0xff96d28c3f3329da")]
+    // f₃ = 9.1743e-09
+    mwc_128_64!(0xff96d28c3f3329da);
 
-#[cfg(feature = "mwc_192_64_0xffa04e67b3c95d86")]
-// Best harmonic score among first 1000 by quantile
-mwc_192_64!(0xffa04e67b3c95d86);
+    #[cfg(feature = "mwc_192_64_0xffa04e67b3c95d86")]
+    // Best harmonic score among first 1000 by quantile
+    mwc_192_64!(0xffa04e67b3c95d86);
 
-#[cfg(feature = "mwc_256_64_0xfff62cf2ccc0cdaf")]
-// Unique value quantile 0.967285
-mwc_256_64!(0xfff62cf2ccc0cdaf);
+    #[cfg(feature = "mwc_256_64_0xfff62cf2ccc0cdaf")]
+    // Unique value quantile 0.967285
+    mwc_256_64!(0xfff62cf2ccc0cdaf);
 
-#[cfg(feature = "mwc_128_32_0xfffea2df")]
-// Unique value quantile 0.972656
-mwc_128_32!(0xfffea2df);
+    #[cfg(feature = "mwc_128_32_0xfffea2df")]
+    // Unique value quantile 0.972656
+    mwc_128_32!(0xfffea2df);
 
-// Multipliers suggested in "Spectrally good multipliers for multiply-with-carry
-// generators" (best weighted geometric mean of the figures of merit)
+    // Multipliers suggested in "Scrambled Multiply-with-Carry Pseudorandom Number
+    // Generators" (best weighted geometric mean of the figures of merit)
 
-#[cfg(feature = "mwc_128_64_0xff6da236274e252e")]
-mwc_128_64!(0xff6da236274e252e);
+    #[cfg(feature = "mwc_128_64_0xff6da236274e252e")]
+    mwc_128_64!(0xff6da236274e252e);
 
-#[cfg(feature = "mwc_192_64_0xff4e24dd418f5433")]
-mwc_192_64!(0xff4e24dd418f5433);
+    #[cfg(feature = "mwc_192_64_0xff4e24dd418f5433")]
+    mwc_192_64!(0xff4e24dd418f5433);
 
-#[cfg(feature = "mwc_256_64_0xff32e7e2bdcb0a33")]
-mwc_256_64!(0xff32e7e2bdcb0a33);
+    #[cfg(feature = "mwc_256_64_0xff32e7e2bdcb0a33")]
+    mwc_256_64!(0xff32e7e2bdcb0a33);
 
-#[cfg(feature = "mwc_128_32_0xffcccc66")]
-mwc_128_32!(0xffcccc66);
+    #[cfg(feature = "mwc_128_32_0xffcccc66")]
+    mwc_128_32!(0xffcccc66);
+}
+
+#[cfg(all(feature = "_mwc", not(feature = "LACUNARY")))]
+pub use mwc::Prng;
+
+// The lacunary triples of an MWC generator with lag *k*.
+#[cfg(all(feature = "_mwc", feature = "LACUNARY"))]
+mod lacunary {
+    use super::mwc::Prng as Mwc;
+
+    /// Returns, from each block of *k* + 2 consecutive outputs *x*ₙ, *x*ₙ₊₁, …,
+    /// *x*ₙ₊ₖ₊₁ of an MWC generator with lag *k*, the triple *x*ₙ, *x*ₙ₊₁,
+    /// *x*ₙ₊ₖ₊₁.
+    ///
+    /// A three-dimensional test, which builds each point from three
+    /// consecutive outputs starting from the first one, thus tests the
+    /// non-overlapping lacunary triples of the generator.
+    #[derive(Clone, Copy)]
+    pub struct Prng {
+        mwc: Mwc,
+        // The position in the current triple of the next output.
+        pos: u64,
+    }
+
+    impl Prng {
+        pub const NAME: &str = Mwc::NAME;
+
+        pub fn new(seed: u64) -> Self {
+            Self {
+                mwc: Mwc::new(seed),
+                pos: 0,
+            }
+        }
+
+        #[inline(always)]
+        pub fn next_u64(&mut self) -> u64 {
+            if self.pos == 2 {
+                // Discard *x*ₙ₊₂, …, *x*ₙ₊ₖ
+                for _ in 1..Mwc::LAG {
+                    self.mwc.next_u64();
+                }
+                self.pos = 0;
+            } else {
+                self.pos += 1;
+            }
+            self.mwc.next_u64()
+        }
+
+        pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
+            // Position `pos` of a triple is position `pos` of its block, and
+            // position (`pos` + *n*) mod 3 of triple ⌊(`pos` + *n*) / 3⌋ is the
+            // same position of block ⌊(`pos` + *n*) / 3⌋; as *k* + 2 ≥ 3, the
+            // difference is nonnegative.
+            let target = self.pos as u128 + n as u128;
+            let steps = target / 3 * (Mwc::LAG as u128 + 2) + target % 3 - self.pos as u128;
+            let (mut q, r) = (steps >> 64, steps as u64);
+            while q > 0 {
+                self.mwc.try_skip(u64::MAX)?;
+                self.mwc.try_skip(1)?;
+                q -= 1;
+            }
+            self.mwc.try_skip(r)?;
+            self.pos = (target % 3) as u64;
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{Mwc, Prng};
+
+        #[test]
+        fn triples() {
+            let mut lacunary = Prng::new(42);
+            let mut mwc = Mwc::new(42);
+            for _ in 0..1000 {
+                let block: Vec<u64> = (0..Mwc::LAG + 2).map(|_| mwc.next_u64()).collect();
+                assert_eq!(lacunary.next_u64(), block[0]);
+                assert_eq!(lacunary.next_u64(), block[1]);
+                assert_eq!(lacunary.next_u64(), block[Mwc::LAG as usize + 1]);
+            }
+        }
+
+        #[test]
+        fn skip() {
+            for start in 0..7 {
+                for n in [0, 1, 2, 3, 4, 5, 6, 7, 299, 300, 301, 1000] {
+                    let mut skipped = Prng::new(42);
+                    let mut stepped = Prng::new(42);
+                    for _ in 0..start {
+                        skipped.next_u64();
+                        stepped.next_u64();
+                    }
+                    skipped.try_skip(n).unwrap();
+                    for _ in 0..n {
+                        stepped.next_u64();
+                    }
+                    for _ in 0..10 {
+                        assert_eq!(
+                            skipped.next_u64(),
+                            stepped.next_u64(),
+                            "start {start}, n {n}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(all(feature = "_mwc", feature = "LACUNARY"))]
+pub use lacunary::Prng;
 
 // ----- SplitMix -------------------------------------------------------------------
 
