@@ -24,6 +24,10 @@ have the lower _d_ bits equal to zero are kept: the cell space has thus size
 The implementation uses scans and radix sorting to process the
 output of the PRNG, using multiple cores if available.
 
+The techniques implemented by this crate are described in detail in
+“[Large-scale collision and birthday-spacings tests for pseudorandom
+number generators by space/time tradeoffs]”, by Sebastiano Vigna.
+
 # Space-time tradeoffs
 
 The main novelty of this crate is the implementation of [_space-time tradeoffs_]
@@ -352,6 +356,7 @@ the test in a naïve way would require at least a terabyte of RAM.
 I would like to thank [Alexey Voskov] for a [very interesting discussion] that
 stimulated me to investigate space-time tradeoffs and publish this crate.
 
+[Large-scale collision and birthday-spacings tests for pseudorandom number generators by space/time tradeoffs]: https://vigna.di.unimi.it/papers.php#VigLSCBSTPNGSTT
 [`cdflib`]: https://crates.io/crates/cdflib
 [`prng`]: https://docs.rs/coll-birth/latest/coll_birth/prng/index.html
 [WyRand]: https://github.com/wangyi-fudan/wyhash
