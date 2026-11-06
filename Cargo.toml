@@ -36,21 +36,25 @@ panic = "abort"
 codegen-units = 1
 
 # Each feature corresponds to a PRNG defined in the prng module. Every PRNG feature
-# enables the internal `_prng` marker, which lets the build emit a single clear error
-# (rather than a cascade of unresolved-`Prng` errors) when none is selected. MWC
-# features also enable the internal `_mwc` marker, so that `MWCX` and `LACUNARY` can check
-# that an MWC generator is selected. Do not enable `_prng` or `_mwc` directly.
+# enables the internal _prng marker, which lets the build emit a single clear error
+# (rather than a cascade of unresolved-Prng errors) when none is selected. MWC features
+# also enable the internal _mwc marker, so that MWCX and LACUNARY can check that an MWC
+# generator is selected; similarly, RANLUX features enable the internal _ranlux marker.
+# Do not enable _prng, _mwc, or _ranlux directly.
 #
 # MWCX is not a generator: combined with an MWC feature, it applies the scrambler X
 # (output digit xored with the carry) to its output. LACUNARY is not a generator
-# either: combined with an MWC feature with lag *k* (and possibly MWCX), it returns
-# the outputs of index 0, 1, and *k* + 1 of each block of *k* + 2, so that a
-# three-dimensional test (the only one accepted) tests the lacunary triples
-# (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁).
+# either: combined with an MWC feature with lag k (and possibly MWCX), it returns the
+# outputs of index 0, 1, and k + 1 of each block of k + 2, so that a three-dimensional
+# test (the only one accepted) tests the lacunary triples (x[n], x[n + 1], x[n + k + 1]).
+# Combined with a RANLUX feature, it returns instead the outputs involved in a sparse
+# linear relation among those kept by the generator, and the only test accepted is that
+# whose dimension is the weight of the relation.
 
 [features]
 _prng = []
 _mwc = []
+_ranlux = []
 MWCX = []
 LACUNARY = []
 mwc_128_64_0xff96d28c3f3329da = ["_prng", "_mwc"]
@@ -74,3 +78,8 @@ lcg_32_32_0xec65035 = ["_prng"]
 lcg_32_32_0x915f77f5 = ["_prng"]
 lcg_64_64_0xa5b9ee81534fa94d = ["_prng"]
 MSWS-CTR = ["_prng"]
+ranlux_0 = ["_prng", "_ranlux"]
+ranlux_1 = ["_prng", "_ranlux"]
+ranlux_2 = ["_prng", "_ranlux"]
+ranlux_3 = ["_prng", "_ranlux"]
+ranlux_4 = ["_prng", "_ranlux"]

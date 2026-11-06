@@ -1,5 +1,17 @@
 # Change Log
 
+## [Unreleased]
+
+### New
+
+- Features `ranlux_0`, …, `ranlux_4` for Lüscher's RANLUX at the five luxury
+  levels, with jump-ahead through the underlying 576-bit LCG.
+
+- The `LACUNARY` feature, combined with a RANLUX feature, returns the outputs
+  involved in a sparse linear relation among those kept by the generator: the
+  only dimension accepted is the weight of the relation (3, 5, 8, 16, and 23 at
+  the respective luxury levels).
+
 ## [0.3.2] 2026-10-24
 
 ### New

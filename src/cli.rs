@@ -103,12 +103,14 @@ impl Args {
         if self.u < 1 {
             Self::die("u must be at least 1");
         }
-        // The generator returns lacunary triples: only a three-dimensional test
-        // builds each point from one of them.
-        if cfg!(feature = "LACUNARY") && self.t != 3 {
+        // The generator returns lacunary tuples: only a test of the same
+        // dimension builds each point from one of them.
+        if cfg!(feature = "LACUNARY") && self.t != crate::prng::LACUNARY_DIM {
             Self::die(&format!(
-                "t ({}) must be 3 with the LACUNARY feature, which returns lacunary triples",
-                self.t
+                "t ({}) must be {} with the LACUNARY feature, which returns lacunary tuples of \
+                 that length",
+                self.t,
+                crate::prng::LACUNARY_DIM
             ));
         }
         // Since u - d >= 1, any t > 128 makes the cell count 2^((u-d)·t) exceed
@@ -132,6 +134,15 @@ impl Args {
                 "u ({}) can be at most 64 - shift ({})",
                 self.u,
                 64 - self.s
+            ));
+        }
+        // Outputs have 24 bits: further bits are zero, and points would collapse
+        // onto a fraction of the cells, simulating a failure of the generator.
+        if cfg!(feature = "_ranlux") && self.u + self.s > 24 {
+            Self::die(&format!(
+                "u ({}) can be at most 24 - shift ({}) with RANLUX, whose outputs have 24 bits",
+                self.u,
+                24usize.saturating_sub(self.s)
             ));
         }
         let d = self.decimation_bits.unwrap_or(0);

@@ -240,6 +240,12 @@ test (the only one accepted) builds each point from a lacunary triple:
 cargo run -r -F mwc_192_64_0xff4e24dd418f5433,LACUNARY -- 36 3 -B -P
 ```
 
+The features `ranlux_0`, …, `ranlux_4` select RANLUX at the given luxury level.
+Since its outputs have 24 bits, *u* + *s* must be at most 24. Combined with a
+RANLUX feature, the `LACUNARY` feature returns the outputs involved in a sparse
+linear relation among those kept by the generator, and the only dimension
+accepted is the weight of the relation (see [below](#example-ranlux)).
+
 # Adding your own generator
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding
@@ -351,6 +357,66 @@ Test completed in 392079.89 seconds
 Our test can detect the bias on a standard workstation. In this case, running
 the test in a naïve way would require at least a terabyte of RAM.
 
+# Example: RANLUX
+
+[RANLUX] is the subtract-with-borrow generator *x*ₙ = (*x*ₙ₋₁₀ − *x*ₙ₋₂₄ −
+*c*ₙ₋₁) mod 2²⁴ with a decimation: from each block of *p* outputs, only the
+first 24 are kept, where *p* is determined by the _luxury level_. It is, again,
+a linear congruential generator in disguise, with multiplier 2⁻²⁴ and modulus
+2⁵⁷⁶ − 2²⁴⁰ + 1, so linear relations with small coefficients among its outputs
+exist at every level: decimation does not remove them, but it hides those
+involving discarded outputs. The ones that are left are longer and have larger
+coefficients, but they can still be found by lattice reduction, and the search
+is helped by the fact that *z*²⁴ − *z*¹⁴ + 1 is a polynomial in *z*², so
+relations among outputs of the same parity have small coefficients. Relations
+with the following weights and largest coefficients exist among kept outputs:
+
+| Level |   *p* | Weight | Largest coefficient |
+|------:|------:|-------:|--------------------:|
+|     0 |    24 |      3 |                   1 |
+|     1 |    48 |      5 |                   1 |
+|     2 |    97 |      8 |                   4 |
+|     3 |   223 |     16 |                  23 |
+|     4 |   389 |     23 |                 115 |
+
+The points built from the outputs of such a relation lie on a family of parallel
+hyperplanes, but a test can see them only if *u* is large with respect to the
+logarithm of the norm of the coefficients. The `LACUNARY` feature returns such
+points, so these tests are _targeted_: they know where to look. These are the
+results obtained on a 10-core machine with seed zero; the "Consecutive" tests
+use the generator as it is, without `LACUNARY`:
+
+| Level | Tuples      | Test                 | Points       | Expected | Observed | *p*-value |
+|------:|:------------|:---------------------|-------------:|---------:|---------:|:----------|
+|     0 | Consecutive | Collisions, 2 25     |  268435456   |       32 |       68 | 2.11e-8   |
+|     0 | Lacunary    | Birthday, 16 3       |     832255   |      512 |   744140 | 0         |
+|     1 | Lacunary    | Collisions, 8 5      |    8388608   |       32 |     3531 | 0         |
+|     1 | Lacunary    | Birthday, 12 5       |   26632170   |     4096 |  3549524 | 0         |
+|     2 | Lacunary    | Collisions, 6 8      |   67108864   |        8 |       77 | 8.88e-48  |
+|     2 | Lacunary    | Birthday, 8 8        |   84551870   |     8192 |   177503 | 0         |
+|     3 | Lacunary    | Collisions, 3 16     |   16777216   |      0.5 |        1 | 0.39      |
+|     3 | Consecutive | Collisions, 3 16     |   16777216   |      0.5 |        0 | 0.5       |
+
+Here a *p*-value of zero means that the value underflowed, and each test takes
+at most a few seconds. For example:
+
+```text
+cargo run -r -F ranlux_1,LACUNARY -- 8 5 8388608 -P
+Generator: RANLUX (luxury level 1, p = 48), lacunary tuples (0, 10, 14, 48, 58)
+Seed: 0x0000000000000000
+Running a 5-dimensional collision test using 10 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (8388608 points, 64-bit cells, 8388608 memory locations, 0.062 GiB RAM)
+u: 8 t: 5 cells: 1099511627776 expected collisions: 31.999914805278728
+Pass 1/1: gen...[0.155s] sort...[0.016s] count...[0.001s], 8388608 points, 3531 collisions, p=0
+3531	p=0
+Test completed in 0.17 seconds
+3531	p=0
+```
+
+Luxury level 3 has not been detected: the tests above are too small to tell
+anything, as with *u* = 3 the rounding noise hides the relation. Luxury level 4
+has not been tested, and its coefficients require more than 128 bits of cell
+index.
+
 # Acknowledgments
 
 I would like to thank [Alexey Voskov] for a [very interesting discussion] that
@@ -358,6 +424,7 @@ stimulated me to investigate space-time tradeoffs and publish this crate.
 
 [Large-scale collision and birthday-spacings tests for pseudorandom number generators by space/time tradeoffs]: https://vigna.di.unimi.it/papers.php#VigLSCBSTPNGSTT
 [`cdflib`]: https://crates.io/crates/cdflib
+[RANLUX]: https://doi.org/10.1016/0010-4655(94)90232-1
 [`prng`]: https://docs.rs/coll-birth/latest/coll_birth/prng/index.html
 [WyRand]: https://github.com/wangyi-fudan/wyhash
 [WyHash]: https://github.com/wangyi-fudan/wyhash

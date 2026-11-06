@@ -87,7 +87,9 @@ fn test_single_pass_collision_sum_matches_full() {
 fn test_single_pass_birthday_sum_matches_full() {
     let seed = 0x0BAD_F00D_DEAD_BEEF;
     let b = 2u32;
-    let mut args = make_args(30, 2, 1 << 16, Some(b as usize), seed);
+    // Spacings are classified by their low bits, so u must not exceed the width
+    // of the output of the generator (24 bits, for RANLUX).
+    let mut args = make_args(24, 2, 1 << 16, Some(b as usize), seed);
     args.birthday_spacings = true;
     let cells = cells_for(&args);
     let (lambda, points) = compute_lambda_and_points(&args, &cells);
@@ -233,8 +235,13 @@ fn test_faithful_birthday_plain_matches_sequential() {
 //
 // The 32-bit LCGs are excluded: their low bits are grossly non-uniform (bit i
 // has period 2ⁱ⁺¹), and decimation keys on low bits, so the class buffer
-// overflows, and both runs abort.
-#[cfg(not(any(feature = "lcg_32_32_0xec65035", feature = "lcg_32_32_0x915f77f5")))]
+// overflows, and both runs abort. RANLUX is excluded because its outputs have
+// 24 bits, so the bits decimation keys on are always zero.
+#[cfg(not(any(
+    feature = "lcg_32_32_0xec65035",
+    feature = "lcg_32_32_0x915f77f5",
+    feature = "_ranlux"
+)))]
 #[test]
 fn test_faithful_birthday_decimation_matches_sequential() {
     let seed = 3;

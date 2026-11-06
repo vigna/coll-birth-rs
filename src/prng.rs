@@ -30,6 +30,13 @@
 //! tests the lacunary triples (*xₙ*, *xₙ*₊₁, *xₙ*₊*ₖ*₊₁), which lie in planes at
 //! a distance similar to that of the successive triples of an MWC generator
 //! with lag one.
+//!
+//! The `ranlux_0`, …, `ranlux_4` features select Lüscher's RANLUX at the given
+//! luxury level. When combined with a RANLUX feature, `LACUNARY` returns the
+//! outputs involved in a sparse linear relation among those kept by the
+//! generator, so that a test whose dimension is the weight of the relation
+//! (the only one accepted) tests points lying on a family of parallel
+//! hyperplanes (see the documentation of the `ranlux` module).
 
 // When no PRNG feature is selected, the _prng marker (enabled by every PRNG
 // feature in Cargo.toml) is off. Emit one clear error AND expose a placeholder Prng
@@ -65,10 +72,20 @@ pub use placeholder::Prng;
 #[cfg(all(feature = "MWCX", not(feature = "_mwc")))]
 compile_error!("the MWCX feature applies only to MWC generators: combine it with an mwc_* feature");
 
-#[cfg(all(feature = "LACUNARY", not(feature = "_mwc")))]
+#[cfg(all(feature = "LACUNARY", not(any(feature = "_mwc", feature = "_ranlux"))))]
 compile_error!(
-    "the LACUNARY feature applies only to MWC generators: combine it with an mwc_* feature"
+    "the LACUNARY feature applies only to MWC and RANLUX generators: combine it with an mwc_* or \
+     a ranlux_* feature"
 );
+
+/// The only dimension accepted when the `LACUNARY` feature is enabled, as the
+/// generator returns one lacunary tuple every `LACUNARY_DIM` outputs.
+#[cfg(feature = "_ranlux")]
+pub const LACUNARY_DIM: usize = ranlux::LEN;
+/// The only dimension accepted when the `LACUNARY` feature is enabled, as the
+/// generator returns one lacunary tuple every `LACUNARY_DIM` outputs.
+#[cfg(not(feature = "_ranlux"))]
+pub const LACUNARY_DIM: usize = 3;
 
 // ----- Multiply-with-carry family -----------------------------------------------------
 
@@ -506,6 +523,445 @@ mod lacunary {
 
 #[cfg(all(feature = "_mwc", feature = "LACUNARY"))]
 pub use lacunary::Prng;
+
+// ----- RANLUX ---------------------------------------------------------------------
+
+// The constants of a luxury level. The relation is a list of pairs (offset in a
+// block of 2p subtract-with-borrow outputs, coefficient).
+#[cfg(feature = "_ranlux")]
+macro_rules! ranlux_level {
+    ($level:literal, $p:literal, [$(($offset:literal, $coeff:literal)),+ $(,)?]) => {
+        /// The number of subtract-with-borrow outputs per block of kept outputs.
+        const P: usize = $p;
+        /// A sparse relation among kept outputs, as pairs (offset, coefficient).
+        const RELATION: &[(usize, i64)] = &[$(($offset, $coeff)),+];
+        pub(super) const NAME: &str = if cfg!(feature = "LACUNARY") {
+            concat!(
+                "RANLUX (luxury level ", $level, ", p = ", $p, "), lacunary tuples (",
+                stringify!($($offset),+),
+                ")"
+            )
+        } else {
+            concat!("RANLUX (luxury level ", $level, ", p = ", $p, ")")
+        };
+    };
+}
+
+/// Lüscher's RANLUX.
+///
+/// RANLUX decimates the subtract-with-borrow generator *x*ₙ = (*x*ₙ₋₁₀ −
+/// *x*ₙ₋₂₄ − *c*ₙ₋₁) mod 2²⁴ of Marsaglia and Zaman: from each block of *p*
+/// outputs it keeps the first 24, where *p*, which is determined by the luxury
+/// level, is 24, 48, 97, 223, or 389.
+///
+/// The generator is an LCG in disguise: if *b* = 2²⁴ and *m* = *b*²⁴ − *b*¹⁰ +
+/// 1, the state with outputs *x*ₙ₋₂₄, …, *x*ₙ₋₁ and carry *c*ₙ₋₁ corresponds to
+///
+/// *Z*ₙ = ∑ⱼ *b*ʲ *x*ₙ₋₂₄₊ⱼ − ∑ₖ *b*ᵏ *x*ₙ₋₁₀₊ₖ + *c*ₙ₋₁,
+///
+/// where 0 ≤ *j* < 24 and 0 ≤ *k* < 10, and *Z*ₙ₊₁ ≡ *b*⁻¹ *Z*ₙ (mod *m*), with
+/// *x*ₙ = ⌊*b* *Z*ₙ₊₁ / *m*⌋. Thus, *x*ₙ / *b* ≈ *Z*ₙ₊₁ / *m*, and whenever ∑
+/// *cᵢ* *b*⁻ⁱ ≡ 0 (mod *m*) the sum ∑ *cᵢ* *x*ₙ₊ᵢ / *b* is within ∑ |*cᵢ*| / *b* of
+/// an integer, whatever the carries are. Decimation does not remove such
+/// relations: it just hides those involving discarded outputs.
+///
+/// Since *z*²⁴ − *z*¹⁴ + 1 is a polynomial in *z*², there are such relations with
+/// small coefficients among outputs with offsets of the same parity. The
+/// relation of each level has been found by lattice reduction, and its weight
+/// is 3, 5, 8, 16, and 23, respectively. The points of a test of that dimension
+/// lie on a family of parallel hyperplanes, but a test can detect them only if
+/// the number *u* of bits is large with respect to the logarithm of the norm of
+/// the coefficients.
+///
+/// # Implementation Notes
+///
+/// The generator is seeded as `std::ranlux24_base`, so that the output of
+/// `new(0)` is that of a default-constructed instance, and reproduces the value
+/// mandated by the C++ standard. Note that in the standard library `ranlux24`
+/// keeps 23 outputs out of 223, whereas we keep 24 as in the original RANLUX.
+///
+/// There is a schedule of `LEN` outputs for each period of `PERIOD`
+/// subtract-with-borrow steps: the first 24 outputs of *p* or, with the
+/// `LACUNARY` feature, the outputs of a relation in a block of 2*p*, so that
+/// different tuples share no output.
+#[cfg(feature = "_ranlux")]
+mod ranlux {
+    use ::num::{BigUint, ToPrimitive};
+
+    /// The number of bits of an output.
+    const W: u32 = 24;
+    /// The long lag.
+    const R: usize = 24;
+    /// The short lag.
+    const S: usize = 10;
+    /// The mask of an output.
+    const MASK: u32 = (1 << W) - 1;
+
+    #[cfg(feature = "ranlux_0")]
+    ranlux_level!(0, 24, [(0, 1), (14, -1), (24, 1)]);
+    #[cfg(feature = "ranlux_1")]
+    ranlux_level!(1, 48, [(0, -1), (10, -1), (14, 1), (48, -1), (58, 1)]);
+    #[cfg(feature = "ranlux_2")]
+    ranlux_level!(
+        2,
+        97,
+        [
+            (8, 1),
+            (18, 1),
+            (22, -1),
+            (98, 1),
+            (104, 3),
+            (108, -4),
+            (114, -1),
+            (118, 3),
+        ]
+    );
+    #[cfg(feature = "ranlux_3")]
+    ranlux_level!(
+        3,
+        223,
+        [
+            (1, -3),
+            (3, 23),
+            (5, 6),
+            (7, 11),
+            (9, 5),
+            (13, 20),
+            (15, 10),
+            (17, -18),
+            (21, -13),
+            (23, 6),
+            (223, 1),
+            (225, -4),
+            (233, -5),
+            (241, 1),
+            (243, 3),
+            (245, 2),
+        ]
+    );
+    #[cfg(feature = "ranlux_4")]
+    ranlux_level!(
+        4,
+        389,
+        [
+            (1, 21),
+            (3, 20),
+            (5, -69),
+            (7, 2),
+            (9, -48),
+            (11, 19),
+            (13, 51),
+            (15, -54),
+            (17, 5),
+            (19, 78),
+            (21, 24),
+            (23, 115),
+            (389, -25),
+            (391, -74),
+            (393, 56),
+            (395, -11),
+            (399, 84),
+            (401, 4),
+            (403, -25),
+            (405, -28),
+            (407, 25),
+            (409, -63),
+            (411, 28),
+        ]
+    );
+
+    /// The number of outputs for each period.
+    #[cfg(not(feature = "LACUNARY"))]
+    pub(super) const LEN: usize = R;
+    /// The number of outputs for each period.
+    #[cfg(feature = "LACUNARY")]
+    pub(super) const LEN: usize = RELATION.len();
+
+    /// The length of a period in subtract-with-borrow steps.
+    #[cfg(not(feature = "LACUNARY"))]
+    const PERIOD: usize = P;
+    /// The length of a period in subtract-with-borrow steps.
+    #[cfg(feature = "LACUNARY")]
+    const PERIOD: usize = 2 * P;
+
+    /// The position in a period of the output of index `i`.
+    #[cfg(not(feature = "LACUNARY"))]
+    #[inline(always)]
+    const fn offset(i: usize) -> usize {
+        i
+    }
+    /// The position in a period of the output of index `i`.
+    #[cfg(feature = "LACUNARY")]
+    #[inline(always)]
+    const fn offset(i: usize) -> usize {
+        RELATION[i].0
+    }
+
+    /// Returns the number of steps from the start of a period to the state in
+    /// which output `i` of the period is next.
+    #[inline(always)]
+    const fn steps_to(i: usize) -> usize {
+        if i == 0 { 0 } else { offset(i - 1) + 1 }
+    }
+
+    /// The subtract-with-borrow generator underlying RANLUX.
+    #[derive(Clone, Copy)]
+    struct Swb {
+        /// The last 24 outputs, as a circular buffer.
+        x: [u32; R],
+        /// The position in `x` of the oldest output.
+        i: usize,
+        /// The carry.
+        c: u32,
+    }
+
+    impl Swb {
+        /// Creates a generator seeded as `std::ranlux24_base`.
+        fn new(seed: u64) -> Self {
+            const LCG_A: u64 = 40014;
+            const LCG_M: u64 = 2147483563;
+            // The default seed of std::ranlux24_base.
+            let mut e = if seed == 0 { 19780503 } else { seed % LCG_M };
+            if e == 0 {
+                e = 1;
+            }
+            let mut x = [0; R];
+            for v in &mut x {
+                e = e * LCG_A % LCG_M;
+                *v = e as u32 & MASK;
+            }
+            let c = (x[R - 1] == 0) as u32;
+            Self { x, i: 0, c }
+        }
+
+        /// Performs a step, returning the output.
+        #[inline(always)]
+        fn step(&mut self) -> u32 {
+            let i = self.i;
+            let j = if i < S { i + R - S } else { i - S };
+            let t = self.x[j].wrapping_sub(self.x[i]).wrapping_sub(self.c);
+            self.c = t >> 31;
+            self.x[i] = t & MASK;
+            self.i = if i == R - 1 { 0 } else { i + 1 };
+            t & MASK
+        }
+
+        /// Skips `n` steps.
+        ///
+        /// See the documentation of the module for the correspondence with an
+        /// LCG. The inverse correspondence recovers the outputs, from the last
+        /// one, as the base-*b* digits of *Z* / *m*.
+        ///
+        /// The correspondence is not injective, but equivalent states yield the
+        /// same outputs, as outputs depend only on *Z*: since a state reached
+        /// by 24 steps or more is the one recovered from its *Z*, this method
+        /// might change, with respect to stepping, just the representation of
+        /// the initial state.
+        fn skip(&mut self, n: u128) {
+            let b = BigUint::from(1u32 << W);
+            let m = b.pow(R as u32) - b.pow(S as u32) + 1u32;
+            // b⁻¹ = m − (m − 1) / b
+            let a = &m - (&m - 1u32) / &b;
+
+            let digits = |x: &dyn Fn(usize) -> u32, len: usize| {
+                (0..len).rev().fold(BigUint::ZERO, |acc, j| acc * &b + x(j))
+            };
+            let high = digits(&|j| self.x[(self.i + j) % R], R);
+            let low = digits(&|j| self.x[(self.i + R - S + j) % R], S);
+            let z = (high + self.c + &m - low) % &m;
+
+            let z = (z * a.modpow(&BigUint::from(n), &m)) % &m;
+
+            let mut r = z.clone();
+            for j in (0..R).rev() {
+                let t = r * &b;
+                self.x[j] = (&t / &m).to_u32().expect("digits are smaller than b");
+                r = t % &m;
+            }
+            self.i = 0;
+            let high = digits(&|j| self.x[j], R);
+            let low = digits(&|j| self.x[R - S + j], S);
+            self.c = (z + low - high)
+                .to_u32()
+                .expect("the carry is either zero or one");
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Prng {
+        swb: Swb,
+        /// The index in the period of the next output.
+        pos: usize,
+    }
+
+    impl Prng {
+        pub const NAME: &str = NAME;
+
+        pub fn new(seed: u64) -> Self {
+            Self {
+                swb: Swb::new(seed),
+                pos: 0,
+            }
+        }
+
+        #[inline(always)]
+        pub fn next_u64(&mut self) -> u64 {
+            for _ in steps_to(self.pos)..offset(self.pos) {
+                self.swb.step();
+            }
+            let result = (self.swb.step() as u64) << (64 - W);
+            self.pos += 1;
+            if self.pos == LEN {
+                for _ in steps_to(LEN)..PERIOD {
+                    self.swb.step();
+                }
+                self.pos = 0;
+            }
+            result
+        }
+
+        pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
+            let target = self.pos as u128 + n as u128;
+            let (periods, pos) = (target / LEN as u128, (target % LEN as u128) as usize);
+            // A period is at least as long as LEN steps, and steps_to() is
+            // monotone in a period, so the difference is nonnegative.
+            let steps = periods * PERIOD as u128 + steps_to(pos) as u128;
+            self.swb.skip(steps - steps_to(self.pos) as u128);
+            self.pos = pos;
+            Ok(())
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn test_standard_value() {
+            // The 10000th output of a default-constructed std::ranlux24_base.
+            let mut swb = Swb::new(0);
+            let mut last = 0;
+            for _ in 0..10000 {
+                last = swb.step();
+            }
+            assert_eq!(last, 7937952);
+        }
+
+        #[test]
+        fn test_schedule() {
+            let mut prng = Prng::new(42);
+            let mut swb = Swb::new(42);
+            for _ in 0..100 {
+                let period: Vec<u32> = (0..PERIOD).map(|_| swb.step()).collect();
+                for i in 0..LEN {
+                    assert_eq!(prng.next_u64() >> 40, period[offset(i)] as u64);
+                }
+            }
+        }
+
+        #[test]
+        fn test_skip_outputs() {
+            for start in 0..2 * LEN {
+                for n in [
+                    0,
+                    1,
+                    2,
+                    3,
+                    LEN as u64 - 1,
+                    LEN as u64,
+                    LEN as u64 + 1,
+                    1000,
+                    100_001,
+                ] {
+                    let mut skipped = Prng::new(42);
+                    let mut stepped = Prng::new(42);
+                    for _ in 0..start {
+                        skipped.next_u64();
+                        stepped.next_u64();
+                    }
+                    skipped.try_skip(n).unwrap();
+                    for _ in 0..n {
+                        stepped.next_u64();
+                    }
+                    for _ in 0..2 * LEN {
+                        assert_eq!(
+                            skipped.next_u64(),
+                            stepped.next_u64(),
+                            "start {start}, n {n}"
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn test_skip_state() {
+            // A jump must restore the whole state, carry included, once the
+            // state has lost the representation assigned by seeding.
+            for seed in 1..50 {
+                for n in [0, 1, 9, 10, 23, 24, 25, 1000, 12345] {
+                    let mut skipped = Swb::new(seed);
+                    for _ in 0..R {
+                        skipped.step();
+                    }
+                    let mut stepped = skipped;
+                    skipped.skip(n as u128);
+                    for _ in 0..n {
+                        stepped.step();
+                    }
+                    assert_eq!(skipped.c, stepped.c, "seed {seed}, n {n}");
+                    for j in 0..R {
+                        assert_eq!(
+                            skipped.x[(skipped.i + j) % R],
+                            stepped.x[(stepped.i + j) % R],
+                            "seed {seed}, n {n}, j {j}"
+                        );
+                    }
+                }
+            }
+        }
+
+        #[test]
+        fn test_skip_composes() {
+            // Jumps longer than any feasible number of steps must compose.
+            let (n, k) = (1u128 << 100, 12345);
+            let mut once = Swb::new(42);
+            once.skip(n + k);
+            let mut twice = Swb::new(42);
+            twice.skip(n);
+            for _ in 0..k {
+                twice.step();
+            }
+            for _ in 0..100 {
+                assert_eq!(once.step(), twice.step());
+            }
+        }
+
+        #[test]
+        fn test_relation() {
+            // The residue must be bounded by the sum of the absolute values of
+            // the coefficients: for uniform outputs, the probability of this
+            // event is at most ≈ 2⁻¹⁰ per sample.
+            let l1: i64 = RELATION.iter().map(|&(_, c)| c.abs()).sum();
+            let mut swb = Swb::new(42);
+            for _ in 0..10000 {
+                let block: Vec<u32> = (0..2 * P).map(|_| swb.step()).collect();
+                let sum: i64 = RELATION
+                    .iter()
+                    .map(|&(o, c)| {
+                        assert!(o % P < R, "offset {o} is not kept");
+                        c * block[o] as i64
+                    })
+                    .sum();
+                let residue = (sum + (1 << 23)).rem_euclid(1 << W) - (1 << 23);
+                assert!(residue.abs() <= l1, "residue {residue}, L1 {l1}");
+            }
+        }
+    }
+}
+
+#[cfg(feature = "_ranlux")]
+pub use ranlux::Prng;
 
 // ----- SplitMix -------------------------------------------------------------------
 

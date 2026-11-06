@@ -59,6 +59,16 @@ jobs:
           - lcg_32_32_0x915f77f5
           - lcg_64_64_0xa5b9ee81534fa94d
           - "MSWS-CTR"
+          - ranlux_0
+          - ranlux_1
+          - ranlux_2
+          - ranlux_3
+          - ranlux_4
+          - "ranlux_0,LACUNARY"
+          - "ranlux_1,LACUNARY"
+          - "ranlux_2,LACUNARY"
+          - "ranlux_3,LACUNARY"
+          - "ranlux_4,LACUNARY"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -101,6 +111,16 @@ jobs:
           - lcg_32_32_0x915f77f5
           - lcg_64_64_0xa5b9ee81534fa94d
           - "MSWS-CTR"
+          - ranlux_0
+          - ranlux_1
+          - ranlux_2
+          - ranlux_3
+          - ranlux_4
+          - "ranlux_0,LACUNARY"
+          - "ranlux_1,LACUNARY"
+          - "ranlux_2,LACUNARY"
+          - "ranlux_3,LACUNARY"
+          - "ranlux_4,LACUNARY"
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
