@@ -4,7 +4,10 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Infrastructure shared by the collision and birthday-spacings tests.
+//! Infrastructure shared by the [collision] and [birthday-spacings] tests.
+//!
+//! [collision]: crate::collision
+//! [birthday-spacings]: crate::birthday
 
 use std::mem::size_of;
 
@@ -35,8 +38,8 @@ use crate::util::{Stopwatch, parallelism, superscript};
 /// base page every 2 MiB, and the rest of the buffer is faulted in on first
 /// access.
 ///
-/// [`MmapFlags::POPULATE`]: mmap_rs::MmapFlags::POPULATE
-/// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: mmap_rs::MmapFlags::TRANSPARENT_HUGE_PAGES
+/// [`MmapFlags::POPULATE`]: https://docs.rs/mmap-rs/latest/mmap_rs/struct.MmapFlags.html#associatedconstant.POPULATE
+/// [`MmapFlags::TRANSPARENT_HUGE_PAGES`]: https://docs.rs/mmap-rs/latest/mmap_rs/struct.MmapFlags.html#associatedconstant.TRANSPARENT_HUGE_PAGES
 pub(crate) fn alloc_mmap<T>(n: usize) -> MmapMut {
     // A failed allocation is not a bug, so we exit with an explanation rather
     // than panicking.
@@ -164,8 +167,8 @@ pub(crate) fn generation_desc(num_cpus: usize, split_desc: &str) -> String {
 /// carry if samples were split evenly among the 2^`partition_bits` bins. The
 /// note is empty if `partition_bits` is zero, as there is no headroom.
 ///
-/// `nominal` is an `f64` because 2^`partition_bits` might not fit in a `usize`
-/// (*t* · *d* might exceed 63).
+/// `nominal` is an [`f64`] because 2^`partition_bits` might not fit in a
+/// [`usize`] (*t* · *d* might exceed 63).
 pub(crate) fn headroom_desc(capacity: usize, nominal: f64, partition_bits: usize) -> String {
     if partition_bits == 0 {
         return String::new();
@@ -218,7 +221,7 @@ impl GridParams<'_> {
     }
 
     /// Draws a candidate tuple from `prng` and returns its decimated cell
-    /// index, or `None` if the tuple is rejected (see [`decimate_once`]).
+    /// index, or [`None`] if the tuple is rejected (see [`decimate_once`]).
     #[inline]
     pub fn draw_decimate_once<T: Cell, const DIM: usize, const FULL: bool>(
         &self,
@@ -235,7 +238,9 @@ impl GridParams<'_> {
 ///
 /// The slice is split into contiguous chunks, and pairs straddling chunk
 /// boundaries are counted separately: on very large slices, this is much
-/// faster than `par_windows`.
+/// faster than [`par_windows`].
+///
+/// [`par_windows`]: rayon::slice::ParallelSlice::par_windows
 #[inline]
 pub(crate) fn count_adjacent_equals<T: Cell>(v: &[T]) -> usize {
     if v.len() < 2 {
@@ -297,10 +302,12 @@ pub(crate) fn merge_into<T: Cell>(buf: &mut [T], prefix_len: usize, src: &[T]) {
 /// A partition of the orbit of the generator among threads.
 ///
 /// A scan of `scan_total` samples is split into `num_cpus` contiguous ranges.
-/// The start of each range is reached by jump-ahead (`try_skip`) if the
+/// The start of each range is reached by jump-ahead ([`try_skip`]) if the
 /// generator supports it, or by a sequential pre-scan
 /// ([`prescan_checkpoints`]) otherwise. In both cases, the result of a parallel
 /// run is the same as that of a sequential run.
+///
+/// [`try_skip`]: crate::prng::Prng::try_skip
 pub(crate) struct OrbitPartition {
     pub(crate) num_cpus: usize,
     pub(crate) scan_total: usize,
@@ -355,7 +362,7 @@ impl OrbitPartition {
     /// Thread `i` starts at sample `base + boundaries[i]`, in a window of
     /// `scan_len` samples. With jump-ahead, the states are computed from the
     /// seed; otherwise, the window is pre-scanned starting from the end of the
-    /// previous pre-scan. If `prescan_label` is not `None`, the pre-scan is
+    /// previous pre-scan. If `prescan_label` is not [`None`], the pre-scan is
     /// announced and timed.
     pub(crate) fn snapshots(
         &mut self,
@@ -412,9 +419,11 @@ impl OrbitPartition {
 ///
 /// `boundaries` must be sorted, and its elements must be smaller than
 /// `total_cells`. The state at `boundaries[i]` is the same that
-/// `try_skip(boundaries[i] * t)` would yield, so this function makes it
-/// possible to split the orbit among threads for generators that cannot jump
-/// ahead. The final state is the start of the next repetition.
+/// [`try_skip(boundaries[i] * t)`][try_skip] would yield, so this function
+/// makes it possible to split the orbit among threads for generators that
+/// cannot jump ahead. The final state is the start of the next repetition.
+///
+/// [try_skip]: crate::prng::Prng::try_skip
 pub(crate) fn prescan_checkpoints(
     start: Prng,
     t: usize,
@@ -516,10 +525,12 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
 /// # Implementation Details
 ///
 /// Since the prefix sums of `used` are bounded by those of `caps`, every block
-/// moves leftward. Blocks are moved left to right, and the destination of
-/// block `i` ends before the source of block `i` + 1, so no move overwrites a
-/// source that has not been moved yet; `copy_within` handles overlaps within a
+/// moves leftward. Blocks are moved left to right, and the destination of block
+/// `i` ends before the source of block `i` + 1, so no move overwrites a source
+/// that has not been moved yet; [`copy_within`] handles overlaps within a
 /// block. If `used[i]` = `caps[i]` for all `i`, nothing is moved.
+///
+/// [`copy_within`]: slice::copy_within
 fn compact_blocks<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usize {
     debug_assert_eq!(caps.len(), used.len());
     let mut src_base = 0usize;

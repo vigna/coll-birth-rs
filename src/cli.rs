@@ -211,9 +211,12 @@ impl Args {
             .exit()
     }
 
-    /// Resolved parallel generation width: `None` for sequential generation,
-    /// `Some(n)` with `n` the Rayon pool size (governed by `RAYON_NUM_THREADS`)
-    /// when `--parallel` is set.
+    /// Resolved parallel generation width: [`None`] for sequential generation,
+    /// [`Some(n)`][Some] with `n` the [Rayon] pool size (governed by
+    /// [`RAYON_NUM_THREADS`]) when `--parallel` is set.
+    ///
+    /// [Rayon]: https://docs.rs/rayon/latest/rayon/
+    /// [`RAYON_NUM_THREADS`]: https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads
     pub fn parallel_cpus(&self) -> Option<usize> {
         if self.parallel {
             Some(crate::util::parallelism())

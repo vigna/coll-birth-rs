@@ -4,39 +4,52 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Pseudorandom number generators selected at build time via Cargo features.
+//! Pseudorandom number generators selected at build time via [Cargo features].
 //!
 //! Exactly one feature must be enabled when building the crate; each variant
-//! exposes a single [`Prng`] type with a `new(seed: u64) -> Self` constructor,
-//! a `next_u64(&mut self) -> u64` step function, and a `try_skip(&mut self, n:
-//! u64) -> Result<(), ()>` method to skip ahead by `n` steps.
+//! exposes a single [`Prng`] type with a [`new(seed: u64) -> Self`][new]
+//! constructor, a [`next_u64(&mut self) -> u64`][next_u64] step function, and a
+//! [`try_skip(&mut self, n: u64) -> Result<(), ()>`][try_skip] method to skip
+//! ahead by `n` steps.
 //!
-//! `try_skip(n)` must have the same effect as `n` calls to `next_u64`. It must
-//! succeed for every `n`, or fail for every `n` (including 0) without changing
-//! the state: the parallel runners probe the capability with `try_skip(0)`.
+//! [`try_skip(n)`][try_skip] must have the same effect as `n` calls to
+//! [`next_u64`][next_u64]. It must succeed for every `n`, or fail for every `n`
+//! (including 0) without changing the state: the parallel runners
+//! [`run_test_parallel`] and [`run_birthday_parallel`] probe the capability
+//! with [`try_skip(0)`][try_skip].
 //!
 //! Generators outputting less than 64 bits must shift their outputs to the top
-//! (e.g., 32-bit generators must return their output shifted to the left by 32).
+//! (e.g., 32-bit generators must return their output shifted to the left by
+//! 32).
 //!
 //! The `MWCX` feature, which must be combined with an MWC feature, applies the
 //! scrambler X to the output of the MWC generator: the output digit is xored
-//! with the carry of the same state (as in Thomas's MWC64X), and the name of
+//! with the carry of the same state (as in [Thomas's MWC64X]), and the name of
 //! the generator gets an `X` suffix.
 //!
-//! The `LACUNARY` feature, which must be combined with an MWC feature (and
-//! possibly with `MWCX`), returns, from each block of *k* + 2 consecutive
-//! outputs of an MWC generator with lag *k*, the outputs of index 0, 1, and
-//! *k* + 1, so that a three-dimensional test (which is the only one accepted)
-//! tests the lacunary triples (*xₙ*, *xₙ*₊₁, *xₙ*₊*ₖ*₊₁), which lie in planes at
-//! a distance similar to that of the successive triples of an MWC generator
-//! with lag one.
+//! The `LACUNARY` feature, combined with an MWC feature (and possibly with
+//! `MWCX`), returns, from each block of *k* + 2 consecutive outputs of an MWC
+//! generator with lag *k*, the outputs of index 0, 1, and *k* + 1, so that a
+//! three-dimensional test (which is the only one accepted) tests the lacunary
+//! triples (*xₙ*, *xₙ*₊₁, *xₙ*₊*ₖ*₊₁), which lie in planes at a distance
+//! similar to that of the successive triples of an MWC generator with lag one.
 //!
-//! The `ranlux_0`, …, `ranlux_4` features select Lüscher's RANLUX at the given
-//! luxury level. When combined with a RANLUX feature, `LACUNARY` returns the
-//! outputs involved in a sparse linear relation among those kept by the
+//! The `ranlux_0`, …, `ranlux_4` features select [Lüscher's RANLUX] at the
+//! given luxury level. When combined with a RANLUX feature, `LACUNARY` returns
+//! the outputs involved in a sparse linear relation among those kept by the
 //! generator, so that a test whose dimension is the weight of the relation
-//! (the only one accepted) tests points lying on a family of parallel
-//! hyperplanes (see the documentation of the `ranlux` module).
+//! ([`LACUNARY_DIM`], the only one accepted) tests points lying on a family of
+//! parallel hyperplanes (see the [RANLUX example]).
+//!
+//! [Cargo features]: https://doc.rust-lang.org/cargo/reference/features.html
+//! [new]: Prng::new
+//! [next_u64]: Prng::next_u64
+//! [try_skip]: Prng::try_skip
+//! [`run_test_parallel`]: crate::collision::run_test_parallel
+//! [`run_birthday_parallel`]: crate::birthday::run_birthday_parallel
+//! [Thomas's MWC64X]: https://web.archive.org/web/20240702142320/https://cas.ee.ic.ac.uk/people/dt10/research/rngs-gpu-mwc64x.html
+//! [Lüscher's RANLUX]: https://luscher.web.cern.ch/luscher/ranlux/
+//! [RANLUX example]: crate#example-ranlux
 
 // When no PRNG feature is selected, the _prng marker (enabled by every PRNG
 // feature in Cargo.toml) is off. Emit one clear error AND expose a placeholder Prng
@@ -531,10 +544,12 @@ pub use lacunary::Prng;
 #[cfg(feature = "_ranlux")]
 macro_rules! ranlux_level {
     ($level:literal, $p:literal, [$(($offset:literal, $coeff:literal)),+ $(,)?]) => {
-        /// The number of subtract-with-borrow outputs per block of kept outputs.
+        /// The number of subtract-with-borrow outputs per block of kept
+        /// outputs.
         const P: usize = $p;
-        /// A sparse relation among kept outputs, as pairs (offset, coefficient).
-        const RELATION: &[(usize, i64)] = &[$(($offset, $coeff)),+];
+        /// A sparse relation among kept outputs, as pairs (offset,
+        /// coefficient).
+        pub(super) const RELATION: &[(usize, i64)] = &[$(($offset, $coeff)),+];
         pub(super) const NAME: &str = if cfg!(feature = "LACUNARY") {
             concat!(
                 "RANLUX (luxury level ", $level, ", p = ", $p, "), lacunary tuples (",
@@ -547,10 +562,11 @@ macro_rules! ranlux_level {
     };
 }
 
-/// Lüscher's RANLUX.
+/// [Lüscher's RANLUX].
 ///
 /// RANLUX decimates the subtract-with-borrow generator *x*ₙ = (*x*ₙ₋₁₀ −
-/// *x*ₙ₋₂₄ − *c*ₙ₋₁) mod 2²⁴ of Marsaglia and Zaman: from each block of *p*
+/// *x*ₙ₋₂₄ − *c*ₙ₋₁) mod 2²⁴ of [Marsaglia and Zaman], where the borrow *c*ₙ is
+/// 1 if *x*ₙ₋₁₀ − *x*ₙ₋₂₄ − *c*ₙ₋₁ < 0, and 0 otherwise: from each block of *p*
 /// outputs it keeps the first 24, where *p*, which is determined by the luxury
 /// level, is 24, 48, 97, 223, or 389.
 ///
@@ -561,29 +577,41 @@ macro_rules! ranlux_level {
 ///
 /// where 0 ≤ *j* < 24 and 0 ≤ *k* < 10, and *Z*ₙ₊₁ ≡ *b*⁻¹ *Z*ₙ (mod *m*), with
 /// *x*ₙ = ⌊*b* *Z*ₙ₊₁ / *m*⌋. Thus, *x*ₙ / *b* ≈ *Z*ₙ₊₁ / *m*, and whenever ∑
-/// *cᵢ* *b*⁻ⁱ ≡ 0 (mod *m*) the sum ∑ *cᵢ* *x*ₙ₊ᵢ / *b* is within ∑ |*cᵢ*| / *b* of
-/// an integer, whatever the carries are. Decimation does not remove such
+/// *cᵢ* *b*⁻ⁱ ≡ 0 (mod *m*) the sum ∑ *cᵢ* *x*ₙ₊ᵢ / *b* is within ∑ |*cᵢ*| /
+/// *b* of an integer, whatever the carries are. Decimation does not remove such
 /// relations: it just hides those involving discarded outputs.
 ///
-/// Since *z*²⁴ − *z*¹⁴ + 1 is a polynomial in *z*², there are such relations with
-/// small coefficients among outputs with offsets of the same parity. The
-/// relation of each level has been found by lattice reduction, and its weight
-/// is 3, 5, 8, 16, and 23, respectively. The points of a test of that dimension
-/// lie on a family of parallel hyperplanes, but a test can detect them only if
-/// the number *u* of bits is large with respect to the logarithm of the norm of
-/// the coefficients.
+/// Since *z*²⁴ − *z*¹⁴ + 1 is a polynomial in *z*², there are such relations
+/// with small coefficients among outputs with offsets of the same parity. The
+/// relation of each level ([`RELATION`]) has been found by lattice reduction,
+/// and its weight is 3, 5, 8, 16, and 23, respectively. The points of a test of
+/// that dimension lie on a family of parallel hyperplanes, but a test can
+/// detect them only if the number *u* of bits is large with respect to the
+/// logarithm of the norm of the coefficients.
 ///
 /// # Implementation Notes
 ///
-/// The generator is seeded as `std::ranlux24_base`, so that the output of
-/// `new(0)` is that of a default-constructed instance, and reproduces the value
-/// mandated by the C++ standard. Note that in the standard library `ranlux24`
-/// keeps 23 outputs out of 223, whereas we keep 24 as in the original RANLUX.
+/// The generator is seeded as [`std::ranlux24_base`], so that the output of
+/// [`new(0)`][new] is that of a default-constructed instance, and reproduces
+/// the value mandated by the C++ standard. Note that in the standard library
+/// [`ranlux24`] keeps 23 outputs out of 223, whereas we keep 24 as in the
+/// original RANLUX.
 ///
-/// There is a schedule of `LEN` outputs for each period of `PERIOD`
+/// There is a schedule of [`LEN`] outputs for each period of [`PERIOD`]
 /// subtract-with-borrow steps: the first 24 outputs of *p* or, with the
 /// `LACUNARY` feature, the outputs of a relation in a block of 2*p*, so that
-/// different tuples share no output.
+/// different tuples share no output. Offsets are subtract-with-borrow steps
+/// from the start of such a block, which is aligned with the blocks of *p*
+/// outputs, and they all fall in the first 24 outputs of a block of *p*.
+///
+/// [Lüscher's RANLUX]: https://luscher.web.cern.ch/luscher/ranlux/
+/// [Marsaglia and Zaman]: https://doi.org/10.1214/aoap/1177005878
+/// [`RELATION`]: ranlux::RELATION
+/// [`std::ranlux24_base`]: https://en.cppreference.com/w/cpp/numeric/random/subtract_with_carry_engine.html
+/// [new]: ranlux::Prng::new
+/// [`ranlux24`]: https://en.cppreference.com/w/cpp/numeric/random/discard_block_engine.html
+/// [`LEN`]: ranlux::LEN
+/// [`PERIOD`]: ranlux::PERIOD
 #[cfg(feature = "_ranlux")]
 mod ranlux {
     use ::num::{BigUint, ToPrimitive};
@@ -679,10 +707,10 @@ mod ranlux {
 
     /// The length of a period in subtract-with-borrow steps.
     #[cfg(not(feature = "LACUNARY"))]
-    const PERIOD: usize = P;
+    pub(super) const PERIOD: usize = P;
     /// The length of a period in subtract-with-borrow steps.
     #[cfg(feature = "LACUNARY")]
-    const PERIOD: usize = 2 * P;
+    pub(super) const PERIOD: usize = 2 * P;
 
     /// The position in a period of the output of index `i`.
     #[cfg(not(feature = "LACUNARY"))]
@@ -716,7 +744,9 @@ mod ranlux {
     }
 
     impl Swb {
-        /// Creates a generator seeded as `std::ranlux24_base`.
+        /// Creates a generator seeded as [`std::ranlux24_base`].
+        ///
+        /// [`std::ranlux24_base`]: https://en.cppreference.com/w/cpp/numeric/random/subtract_with_carry_engine.html
         fn new(seed: u64) -> Self {
             const LCG_A: u64 = 40014;
             const LCG_M: u64 = 2147483563;
@@ -748,7 +778,7 @@ mod ranlux {
 
         /// Skips `n` steps.
         ///
-        /// See the documentation of the module for the correspondence with an
+        /// See the [documentation of the module] for the correspondence with an
         /// LCG. The inverse correspondence recovers the outputs, from the last
         /// one, as the base-*b* digits of *Z* / *m*.
         ///
@@ -757,6 +787,8 @@ mod ranlux {
         /// by 24 steps or more is the one recovered from its *Z*, this method
         /// might change, with respect to stepping, just the representation of
         /// the initial state.
+        ///
+        /// [documentation of the module]: self
         fn skip(&mut self, n: u128) {
             let b = BigUint::from(1u32 << W);
             let m = b.pow(R as u32) - b.pow(S as u32) + 1u32;

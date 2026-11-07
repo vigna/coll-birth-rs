@@ -21,12 +21,25 @@ _d_ < _u_ decimation bits are specified, only those tuples in which all elements
 have the lower _d_ bits equal to zero are kept: the cell space has thus size
 (2*ᵘ* ⁻ *ᵈ*)_ᵗ_.
 
-The implementation uses scans and radix sorting to process the
+The implementation uses scans and [radix sorting] to process the
 output of the PRNG, using multiple cores if available.
 
 The techniques implemented by this crate are described in detail in
 “[Large-scale collision and birthday-spacings tests for pseudorandom
 number generators by space/time tradeoffs]”, by Sebastiano Vigna.
+
+The PRNG under test is selected at build time by a Cargo feature, so the
+documentation on [docs.rs] covers just one generator (`incr`). To read the
+documentation of another generator, generate it locally with the corresponding
+feature; as many generators are defined in private modules, you must also ask
+for private items:
+
+```text
+cargo doc --no-deps --document-private-items -F ranlux_1 --open
+```
+
+For example, in this case the documentation of RANLUX is in the `ranlux`
+submodule of the `prng` module.
 
 # Space-time tradeoffs
 
@@ -47,7 +60,7 @@ since spacings cluster near zero); thus, the birthday-spacings test runs
 
 For simplicity of interaction with the tool, the main parameter to the tests is
 _m_, the number of memory locations, which, depending on _t_ · (_u_ − _d_), will
-be `u32`, `u64`, or `u128`; the number is approximate because tradeoff and
+be [`u32`], [`u64`], or [`u128`]; the number is approximate because tradeoff and
 decimation add a little headroom, detailed at the end of this list.
 
 The counts below, derived from _m_, are exact, except that decimation (which
@@ -76,7 +89,7 @@ least 99% of the mean (always for birthday spacings), a binomial approximation
 with the same mean and variance when it is at least 54% of the mean, and a
 normal approximation otherwise. With 10⁴ points, the minimum, all tails out to
 six standard deviations are within 25% of those of the exact distribution.
-TestU01, instead, uses the Poisson approximation up to density (points over
+[TestU01], instead, uses the Poisson approximation up to density (points over
 cells) 1.0001, but at density 1 the Poisson variance is almost four times the
 true one. The null distribution is computed using the number of points
 actually kept (relevant under decimation, where the kept count is random). By
@@ -94,12 +107,12 @@ orbit to find the initial state of each segment breaks even, and with more
 processors it becomes competitive.
 
 Sorting and counting always run in parallel, and with `-P` so does generation.
-All parallel phases use the Rayon global thread pool, so you can customize the
+All parallel phases use the [Rayon] global thread pool, so you can customize the
 number of threads for every phase with the environment variable
-`RAYON_NUM_THREADS` (it defaults to the number of available cores). The run
+[`RAYON_NUM_THREADS`] (it defaults to the number of available cores). The run
 header states how the points were generated, that is "sequentially", or "using k
 parallel generators" followed by how each segment start was reached
-(`jump-ahead` or `pre-scan`), so that the effect of `RAYON_NUM_THREADS` on
+(`jump-ahead` or `pre-scan`), so that the effect of [`RAYON_NUM_THREADS`] on
 `-P` is visible in the output.
 
 # Decimation
@@ -152,7 +165,7 @@ effective technique.
 
 # Usage
 
-The generator to test is selected at compilation time using Cargo features.
+The generator to test is selected at compilation time using [Cargo features].
 For example,
 
 ```text
@@ -224,7 +237,7 @@ Test completed in 465.96 seconds
 
 The `MWCX` feature can be combined with any MWC generator feature to apply the
 scrambler X, which xors the output digit with the carry of the same state, as
-in Thomas's MWC64X:
+in [Thomas's MWC64X]:
 
 ```text
 cargo run -r -F mwc_192_64_0xff4e24dd418f5433,MWCX -- 36 3 -B -P
@@ -244,13 +257,13 @@ The features `ranlux_0`, …, `ranlux_4` select RANLUX at the given luxury level
 Since its outputs have 24 bits, *u* + *s* must be at most 24. Combined with a
 RANLUX feature, the `LACUNARY` feature returns the outputs involved in a sparse
 linear relation among those kept by the generator, and the only dimension
-accepted is the weight of the relation (see [below](#example-ranlux)).
+accepted is the weight of the relation (see [below]).
 
 # Adding your own generator
 
 To add a new generator, add a feature in `Cargo.toml` and a corresponding
 implementation in the [`prng`] module. If skipping is possible, you can
-implement the `try_skip` method, which must succeed for every offset or for
+implement the [`try_skip`] method, which must succeed for every offset or for
 none (see the [`prng`] module documentation).
 
 # Example: WyRand
@@ -359,9 +372,11 @@ the test in a naïve way would require at least a terabyte of RAM.
 
 # Example: RANLUX
 
-[RANLUX] is the subtract-with-borrow generator *x*ₙ = (*x*ₙ₋₁₀ − *x*ₙ₋₂₄ −
-*c*ₙ₋₁) mod 2²⁴ with a decimation: from each block of *p* outputs, only the
-first 24 are kept, where *p* is determined by the _luxury level_. It is, again,
+[RANLUX] (see also [Lüscher's page]) is the [subtract-with-borrow generator]
+*x*ₙ = (*x*ₙ₋₁₀ − *x*ₙ₋₂₄ − *c*ₙ₋₁) mod 2²⁴, where the borrow *c*ₙ is 1 if
+*x*ₙ₋₁₀ − *x*ₙ₋₂₄ − *c*ₙ₋₁ < 0, and 0 otherwise, with a decimation: from each
+block of *p* outputs, only the first 24 are kept, where *p* is determined by the
+_luxury level_. It is, again,
 a linear congruential generator in disguise, with multiplier 2⁻²⁴ and modulus
 2⁵⁷⁶ − 2²⁴⁰ + 1, so linear relations with small coefficients among its outputs
 exist at every level: decimation does not remove them, but it hides those
@@ -382,40 +397,45 @@ with the following weights and largest coefficients exist among kept outputs:
 The points built from the outputs of such a relation lie on a family of parallel
 hyperplanes, but a test can see them only if *u* is large with respect to the
 logarithm of the norm of the coefficients. The `LACUNARY` feature returns such
-points, so these tests are _targeted_: they know where to look. These are the
-results obtained on a 10-core machine with seed zero; the "Consecutive" tests
-use the generator as it is, without `LACUNARY`:
+points, so the corresponding tests are _targeted_: they know where to look, and
+where blocks start. The _direct_ tests, instead, use the generator as it is,
+without `LACUNARY`, on consecutive outputs: with *t* = 48 a tuple covers two
+blocks of kept outputs, so it sees all relations between the blocks at once (at
+level 0 nothing is discarded, and *t* = 25 is enough). These are the results
+with seed zero and 10 cores, one failure for each level and kind of tuples:
 
-| Level | Tuples      | Test                 | Points       | Expected | Observed | *p*-value |
-|------:|:------------|:---------------------|-------------:|---------:|---------:|:----------|
-|     0 | Consecutive | Collisions, 2 25     |  268435456   |       32 |       68 | 2.11e-8   |
-|     0 | Lacunary    | Birthday, 16 3       |     832255   |      512 |   744140 | 0         |
-|     1 | Lacunary    | Collisions, 8 5      |    8388608   |       32 |     3531 | 0         |
-|     1 | Lacunary    | Birthday, 12 5       |   26632170   |     4096 |  3549524 | 0         |
-|     2 | Lacunary    | Collisions, 6 8      |   67108864   |        8 |       77 | 8.88e-48  |
-|     2 | Lacunary    | Birthday, 8 8        |   84551870   |     8192 |   177503 | 0         |
-|     3 | Lacunary    | Collisions, 3 16     |   16777216   |      0.5 |        1 | 0.39      |
-|     3 | Consecutive | Collisions, 3 16     |   16777216   |      0.5 |        0 | 0.5       |
+| Level | Tuples   | Test       | *u* | *t* | Points | Expected | Observed | *p*-value |
+|------:|:---------|:-----------|----:|----:|-------:|---------:|---------:|:----------|
+|     0 | Direct   | Collisions |   2 |  25 |    10⁹ |      444 |      892 | 5.85e-78  |
+|     0 | Lacunary | Birthday   |  17 |   3 |    10⁶ |      111 |   785436 | 0         |
+|     1 | Direct   | Collisions |   1 |  48 |    10⁹ |     1776 |     2026 | 3.64e-9   |
+|     1 | Lacunary | Collisions |   8 |   5 |    10⁷ |       45 |     4954 | 0         |
+|     2 | Lacunary | Collisions |   6 |   8 |    10⁸ |       18 |      194 | 4.09e-127 |
 
 Here a *p*-value of zero means that the value underflowed, and each test takes
-at most a few seconds. For example:
+less than 20 seconds. For example:
 
 ```text
-cargo run -r -F ranlux_1,LACUNARY -- 8 5 8388608 -P
+cargo run -r -F ranlux_1,LACUNARY -- 8 5 10000000 -P
 Generator: RANLUX (luxury level 1, p = 48), lacunary tuples (0, 10, 14, 48, 58)
 Seed: 0x0000000000000000
-Running a 5-dimensional collision test using 10 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (8388608 points, 64-bit cells, 8388608 memory locations, 0.062 GiB RAM)
-u: 8 t: 5 cells: 1099511627776 expected collisions: 31.999914805278728
-Pass 1/1: gen...[0.155s] sort...[0.016s] count...[0.001s], 8388608 points, 3531 collisions, p=0
-3531	p=0
-Test completed in 0.17 seconds
-3531	p=0
+Running a 5-dimensional collision test using 10 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (10000000 points, 64-bit cells, 10000000 memory locations, 0.075 GiB RAM)
+u: 8 t: 5 cells: 1099511627776 expected collisions: 45.4745926780923
+Pass 1/1: gen...[0.178s] sort...[0.015s] count...[0.001s], 10000000 points, 4954 collisions, p=0
+4954	p=0
+Test completed in 0.20 seconds
+4954	p=0
 ```
 
-Luxury level 3 has not been detected: the tests above are too small to tell
-anything, as with *u* = 3 the rounding noise hides the relation. Luxury level 4
-has not been tested, and its coefficients require more than 128 bits of cell
-index.
+Thus, luxury levels 0 and 1 fail direct tests, and luxury level 2 fails targeted
+tests. We estimate that a direct failure at level 2 would require a
+birthday-spacings test with *u* = 2 and *t* = 48 on about 2⁴² points, that is,
+about 120 TB of RAM, or about ten years on a 192-core machine with 752 GiB of
+RAM using a space-time tradeoff. No test has detected luxury level 3: the tests
+we completed are too small to tell anything, as with *u* = 3 the rounding noise
+hides the relation, and direct tests with *t* = 16 cannot see it at all, as it
+spans 46 kept outputs. Luxury level 4 has not been tested, and its coefficients
+require more than 128 bits of cell index.
 
 # Acknowledgments
 
@@ -425,6 +445,19 @@ stimulated me to investigate space-time tradeoffs and publish this crate.
 [Large-scale collision and birthday-spacings tests for pseudorandom number generators by space/time tradeoffs]: https://vigna.di.unimi.it/papers.php#VigLSCBSTPNGSTT
 [`cdflib`]: https://crates.io/crates/cdflib
 [RANLUX]: https://doi.org/10.1016/0010-4655(94)90232-1
+[Lüscher's page]: https://luscher.web.cern.ch/luscher/ranlux/
+[Thomas's MWC64X]: https://web.archive.org/web/20240702142320/https://cas.ee.ic.ac.uk/people/dt10/research/rngs-gpu-mwc64x.html
+[subtract-with-borrow generator]: https://doi.org/10.1214/aoap/1177005878
+[docs.rs]: https://docs.rs/coll-birth
+[radix sorting]: https://docs.rs/voracious_radix_sort/latest/voracious_radix_sort/
+[Cargo features]: https://doc.rust-lang.org/cargo/reference/features.html
+[Rayon]: https://docs.rs/rayon/latest/rayon/
+[`RAYON_NUM_THREADS`]: https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads
+[`u32`]: https://doc.rust-lang.org/std/primitive.u32.html
+[`u64`]: https://doc.rust-lang.org/std/primitive.u64.html
+[`u128`]: https://doc.rust-lang.org/std/primitive.u128.html
+[`try_skip`]: https://docs.rs/coll-birth/latest/coll_birth/prng/struct.Prng.html#method.try_skip
+[below]: #example-ranlux
 [`prng`]: https://docs.rs/coll-birth/latest/coll_birth/prng/index.html
 [WyRand]: https://github.com/wangyi-fudan/wyhash
 [WyHash]: https://github.com/wangyi-fudan/wyhash

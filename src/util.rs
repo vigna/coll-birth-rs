@@ -33,11 +33,14 @@ pub fn superscript(n: impl Display) -> String {
         .collect()
 }
 
-/// Returns the number of threads of the Rayon global thread pool.
+/// Returns the number of threads of the [Rayon global thread pool].
 ///
 /// All parallel phases (generation, sorting, and counting) use this number of
-/// threads, so they all honor `RAYON_NUM_THREADS` (by default, the number of
+/// threads, so they all honor [`RAYON_NUM_THREADS`] (by default, the number of
 /// available cores).
+///
+/// [Rayon global thread pool]: rayon::current_num_threads
+/// [`RAYON_NUM_THREADS`]: https://docs.rs/rayon/latest/rayon/struct.ThreadPoolBuilder.html#method.num_threads
 pub fn parallelism() -> usize {
     rayon::current_num_threads()
 }

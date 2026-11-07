@@ -288,10 +288,10 @@ pub fn run_collision_decimate<T: Cell, const DIM: usize, const FULL: bool>(
 /// The samples of each pass are split into `num_cpus` contiguous ranges, and
 /// each thread writes the points of its range into a disjoint region of a
 /// shared buffer. Threads reach the start of their range by jump-ahead
-/// (`try_skip`) or, for generators that cannot jump, by a sequential pre-scan;
-/// repetitions continue the same orbit. The result is thus the same as that of
-/// [`run_test`]. Without tradeoff there is a single pass; with tradeoff there
-/// are 2ᵇ passes, as in [`run_collision_tradeoff`].
+/// ([`try_skip`]) or, for generators that cannot jump, by a sequential
+/// pre-scan; repetitions continue the same orbit. The result is thus the same
+/// as that of [`run_test`]. Without tradeoff there is a single pass; with
+/// tradeoff there are 2ᵇ passes, as in [`run_collision_tradeoff`].
 ///
 /// After each pass, the regions are compacted, and the whole buffer is sorted
 /// and scanned to count collisions, so no merge is necessary. Only one pass is
@@ -306,6 +306,7 @@ pub fn run_collision_decimate<T: Cell, const DIM: usize, const FULL: bool>(
 /// actually kept.
 ///
 /// [`run_test`]: crate::common::run_test
+/// [`try_skip`]: crate::prng::Prng::try_skip
 pub fn run_test_parallel<T: Cell>(
     args: &Args,
     points: usize,

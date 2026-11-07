@@ -6,8 +6,8 @@
 
 //! Cell indices.
 //!
-//! The [`Cell`] trait abstracts over the integer types (`u32`, `u64`, and
-//! `u128`) used to store cell indices, and [`cell_index`] and
+//! The [`Cell`] trait abstracts over the integer types ([`u32`], [`u64`], and
+//! [`u128`]) used to store cell indices, and [`cell_index`] and
 //! [`decimate_once`] draw cell indices from a generator.
 
 use voracious_radix_sort::{RadixSort, ska_sort};
@@ -44,10 +44,14 @@ pub trait Cell:
     /// unbalanced.
     fn low_bits_mask(b: usize) -> Self;
 
-    /// Sorts `v` in place using a multithreaded radix sort.
+    /// Sorts `v` in place using a multithreaded [radix sort].
+    ///
+    /// [radix sort]: https://docs.rs/voracious_radix_sort/latest/voracious_radix_sort/
     fn sort_mt(v: &mut [Self]);
 
-    /// Sorts `v` in place using a single-threaded radix sort.
+    /// Sorts `v` in place using a single-threaded [radix sort].
+    ///
+    /// [radix sort]: https://docs.rs/voracious_radix_sort/latest/voracious_radix_sort/
     fn sort_st(v: &mut [Self]);
 }
 
@@ -140,7 +144,7 @@ pub fn cell_index<T: Cell, const DIM: usize, const FULL: bool>(
 }
 
 /// Draws a candidate tuple from `prng` and returns its decimated cell index, or
-/// `None` if the tuple is rejected.
+/// [`None`] if the tuple is rejected.
 ///
 /// The tuple is accepted if the lowest *d* bits of all its elements are zero,
 /// and in this case the index is the concatenation of the elements without

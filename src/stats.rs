@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0 OR MIT
  */
 
-//! Statistical helpers: expected collision count, adjusted *p*-values, and formatting.
+//! Statistical helpers: expected collision count ([`expected_collisions`]),
+//! adjusted *p*-values ([`p_value`]), and formatting ([`format_p_value`]).
 
 use std::borrow::Cow;
 
@@ -99,7 +100,7 @@ impl Null {
     /// mean when the density α is small, and 0.26 times its mean at α = 1. The
     /// Poisson approximation thus overestimates tails: at six standard
     /// deviations, by 20% at ratio 0.99, by a factor of 10 at α = 0.1, and by a
-    /// factor of 10⁶ at α = 1. TestU01 uses it up to density 1.0001.
+    /// factor of 10⁶ at α = 1. [TestU01] uses it up to density 1.0001.
     ///
     /// The normal approximation ignores the skewness of the count: when the
     /// mean is small, at six standard deviations it underestimates the right
@@ -110,6 +111,8 @@ impl Null {
     /// normal approximation improves: they have the same error at ratio 0.54,
     /// independently of the number of points. There, for 10⁴ points, tails at
     /// six standard deviations are within 25% of the exact ones.
+    ///
+    /// [TestU01]: https://doi.org/10.1145/1268776.1268777
     pub fn kind(&self) -> NullKind {
         // Degenerate values (zero or NaN) fall through to the Poisson case.
         if self.var < NORMAL_VARIANCE_RATIO * self.mean {
@@ -169,14 +172,14 @@ pub struct PoissonTails {
 
 /// Computes the Poisson lower and upper tail probabilities at `coll` given mean `lambda`.
 ///
-/// Returns `None` when `lambda` is not a valid Poisson rate or `coll` is not a
-/// non-negative integer representable as `u64`.
+/// Returns [`None`] when `lambda` is not a valid Poisson rate or `coll` is not
+/// a non-negative integer representable as [`u64`].
 ///
 /// # Implementation notes
 ///
-/// [`DiscreteCdf::ccdf`] returns `Pr[X > s]`; computing `Pr[X >= coll]` therefore
-/// evaluates the complementary CDF at `coll - 1`. The `coll == 0` case is
-/// special-cased to avoid underflowing the `u64` argument.
+/// [`DiscreteCdf::ccdf`] returns `Pr[X > s]`; computing `Pr[X >= coll]`
+/// therefore evaluates the complementary CDF at `coll - 1`. The `coll == 0`
+/// case is special-cased to avoid underflowing the [`u64`] argument.
 pub fn poisson_tails(coll: f64, lambda: f64) -> Option<PoissonTails> {
     if !coll.is_finite() || coll < 0.0 || coll.fract() != 0.0 {
         return None;
@@ -249,7 +252,10 @@ pub fn expected_collisions(points: f64, cells: f64) -> f64 {
 ///
 /// To avoid cancellation, we compute *k*(*a* − *b*) + *k*²(*b* − *a*²) using
 /// *b*/*a* = (1 − 1/(*k* − 1))*ⁿ* and *b*/*a*² = (1 − 1/(*k* − 1)²)*ⁿ*, through
-/// `ln_1p` and `exp_m1`.
+/// [`ln_1p`] and [`exp_m1`].
+///
+/// [`ln_1p`]: f64::ln_1p
+/// [`exp_m1`]: f64::exp_m1
 pub fn collision_variance(points: f64, cells: f64) -> f64 {
     if points <= 1.0 {
         return 0.0;
@@ -263,19 +269,24 @@ pub fn collision_variance(points: f64, cells: f64) -> f64 {
     (cells * a_minus_b + cells * cells * b_minus_a2).max(0.0)
 }
 
-/// A TestU01-style two-sided adjusted *p*-value, kept in a form that survives the
-/// approach to 1.
+/// A [TestU01]-style two-sided adjusted *p*-value, kept in a form that survives
+/// the approach to 1.
 ///
 /// A left-tail anomaly (too few collisions) has *p*-value `1 − p_left` with
-/// `p_left = Pr[X ≤ coll]` astronomically small. Storing that as a single `f64`
-/// would round it to exactly `1.0` as soon as `p_left` drops below the machine
-/// epsilon (~1.1·10⁻¹⁶), discarding the tail. We therefore keep `p_left` itself
-/// in [`PValue::NearOne`] and defer the lossy `1 − ε` subtraction to formatting,
-/// where it is only performed in the plain (non-pretty) rendering.
+/// `p_left = Pr[X ≤ coll]` astronomically small. Storing that as a single
+/// [`f64`] would round it to exactly `1.0` as soon as `p_left` drops below the
+/// machine epsilon (~1.1·10⁻¹⁶), discarding the tail. We therefore keep
+/// `p_left` itself in [`PValue::NearOne`] and defer the lossy `1 − ε`
+/// subtraction to formatting, where it is only performed in the plain
+/// (non-pretty) rendering.
+///
+/// [TestU01]: https://doi.org/10.1145/1268776.1268777
 #[derive(Clone, Copy, Debug)]
 pub enum PValue {
-    /// The *p*-value, stored directly (near 0 or in the middle of the range; also
-    /// carries `f64::NAN` when CDFLIB reports an error).
+    /// The *p*-value, stored directly (near 0 or in the middle of the range;
+    /// also carries [`f64::NAN`] when [CDFLIB] reports an error).
+    ///
+    /// [CDFLIB]: https://docs.rs/cdflib/latest/cdflib/
     Direct(f64),
     /// A near-1 *p*-value equal to `1 − eps`, with `eps = p_left` retained at full
     /// precision so that pretty mode can print it as `1 − eps`.
@@ -305,12 +316,15 @@ fn binomial_tails(coll: f64, n: f64, q: f64, q_c: f64) -> Option<(f64, f64)> {
 }
 
 /// Returns Pr[*X* ≤ *c*] and Pr[*X* ≥ *c*], where *c* = `coll`, for the
-/// approximating distribution of `null` (see [`Null::kind`]), or `None` if
-/// `coll` is not a nonnegative integer or CDFLIB reports an error.
+/// approximating distribution of `null` (see [`Null::kind`]), or [`None`] if
+/// `coll` is not a nonnegative integer or [CDFLIB] reports an error.
 ///
 /// The binomial distribution has success probability *q* = 1 − σ²/λ and λ/*q*
-/// trials; the normal tails are, as in TestU01, Φ((*c* − λ)/σ) and 1 − Φ((*c* −
-/// 1 − λ)/σ).
+/// trials; the normal tails are, as in [TestU01], Φ((*c* − λ)/σ) and 1 − Φ((*c*
+/// − 1 − λ)/σ).
+///
+/// [CDFLIB]: https://docs.rs/cdflib/latest/cdflib/
+/// [TestU01]: https://doi.org/10.1145/1268776.1268777
 pub fn null_tails(coll: f64, null: Null) -> Option<(f64, f64)> {
     if !coll.is_finite() || coll < 0.0 || coll.fract() != 0.0 {
         return None;
@@ -333,9 +347,12 @@ pub fn null_tails(coll: f64, null: Null) -> Option<(f64, f64)> {
     }
 }
 
-/// Returns the TestU01-style two-sided adjusted *p*-value of `coll` under
+/// Returns the [TestU01]-style two-sided adjusted *p*-value of `coll` under
 /// `null` (see Chapter 3 of the long TestU01 guide), or
-/// [`PValue::Direct`]`(f64::NAN)` if CDFLIB reports an error.
+/// [`PValue::Direct`]`(`[`f64::NAN`]`)` if [CDFLIB] reports an error.
+///
+/// [TestU01]: https://doi.org/10.1145/1268776.1268777
+/// [CDFLIB]: https://docs.rs/cdflib/latest/cdflib/
 pub fn p_value(coll: f64, null: Null) -> PValue {
     let Some((p_left, p_right)) = null_tails(coll, null) else {
         return PValue::Direct(f64::NAN);

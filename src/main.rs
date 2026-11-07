@@ -21,10 +21,10 @@ use coll_birth::stats::{NullKind, format_p_value, p_value};
 ///
 /// Cell indices are below `cells`; birthday spacings additionally store the
 /// wrap-around `cells - max + min`, which is evaluated through the
-/// representable `cells - 1` and fits the same width (the degenerate `min ==
-/// max` case, where it would equal `cells`, is dropped without affecting the
-/// collision count—see `compute_spacings`). Both tests therefore use `u32` when
-/// `cells` ≤ 2³², `u64` when ≤ 2⁶⁴, and `u128` otherwise.
+/// representable `cells - 1` and fits the same width (the degenerate
+/// `min == max` case, where it would equal `cells`, is dropped without
+/// affecting the collision count—see `compute_spacings`). Both tests therefore
+/// use [`u32`] when `cells` ≤ 2³², [`u64`] when ≤ 2⁶⁴, and [`u128`] otherwise.
 fn dispatch<F32, F64, F128, R>(cells: &BigUint, f32: F32, f64: F64, f128: F128) -> R
 where
     F32: FnOnce() -> R,
