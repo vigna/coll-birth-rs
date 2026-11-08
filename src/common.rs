@@ -515,35 +515,61 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
     }
 }
 
-/// Closes in place the gaps left by partially filled thread regions, and
+/// Fills in place the gaps left by partially filled thread regions, and
 /// returns the number of points.
 ///
 /// `buf` is partitioned into regions of size `caps[i]`, and thread `i` wrote
 /// `used[i]` ≤ `caps[i]` points at the start of its region. This function
-/// moves the points so that they are contiguous at the start of `buf`.
+/// moves the points so that they occupy the first *n* = Σ `used` positions of
+/// `buf`, in no particular order (all callers sort them next).
 ///
 /// # Implementation Details
 ///
-/// Since the prefix sums of `used` are bounded by those of `caps`, every block
-/// moves leftward. Blocks are moved left to right, and the destination of block
-/// `i` ends before the source of block `i` + 1, so no move overwrites a source
-/// that has not been moved yet; [`copy_within`] handles overlaps within a
-/// block. If `used[i]` = `caps[i]` for all `i`, nothing is moved.
-///
-/// [`copy_within`]: slice::copy_within
-fn compact_blocks<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usize {
+/// The gaps lying below position *n* are filled with the points lying at or
+/// above it, of which there are exactly as many. Since the two sets of
+/// positions are disjoint, the order of the moves does not matter, and the
+/// points already below *n* do not move. Thus, at most Σ (`caps[i]` −
+/// `used[i]`) points are moved, that is, at most the headroom of the regions,
+/// rather than almost all points, as shifting the regions leftward would
+/// require. If `used[i]` = `caps[i]` for all `i`, nothing is moved.
+fn fill_gaps<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usize {
     debug_assert_eq!(caps.len(), used.len());
-    let mut src_base = 0usize;
-    let mut dst = 0usize;
+    let n: usize = used.iter().sum();
+    // The gaps below n, and the points at or above n, as ranges of positions.
+    let mut gaps = Vec::new();
+    let mut tail = Vec::new();
+    let mut base = 0usize;
     for (&cap, &len) in caps.iter().zip(used) {
         debug_assert!(len <= cap);
-        if dst != src_base {
-            buf.copy_within(src_base..src_base + len, dst);
+        let end = base + len;
+        let gap_end = (base + cap).min(n);
+        if end < gap_end {
+            gaps.push(end..gap_end);
         }
-        dst += len;
-        src_base += cap;
+        let tail_start = base.max(n);
+        if tail_start < end {
+            tail.push(tail_start..end);
+        }
+        base += cap;
     }
-    dst
+
+    let mut tail = tail.into_iter();
+    let mut src = 0..0;
+    for mut gap in gaps {
+        while !gap.is_empty() {
+            if src.is_empty() {
+                src = tail
+                    .next()
+                    .expect("there are as many points above n as gaps below n");
+            }
+            let len = gap.len().min(src.len());
+            buf.copy_within(src.start..src.start + len, gap.start);
+            gap.start += len;
+            src.start += len;
+        }
+    }
+    debug_assert!(src.is_empty() && tail.next().is_none());
+    n
 }
 
 /// Generates in parallel the points of a pass into a contiguous buffer, and
@@ -551,9 +577,9 @@ fn compact_blocks<T: Cell>(buf: &mut [T], caps: &[usize], used: &[usize]) -> usi
 ///
 /// Thread `i` scans `chunk(i)` samples starting from `snapshots[i]`, and writes
 /// the points it keeps into a region of `buf` of size `caps[i]` (see
-/// [`gen_pass_dispatch`]). The regions are then compacted (see
-/// [`compact_blocks`]), so the points are stored, unsorted, at the start of
-/// `buf`, whose length must be at least Σ `caps`.
+/// [`gen_pass_dispatch`]). The gaps between the regions are then filled (see
+/// [`fill_gaps`]), so the points are stored, unsorted, at the start of `buf`,
+/// whose length must be at least Σ `caps`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn gen_unit_contiguous<T: Cell>(
     buf: &mut [T],
@@ -598,8 +624,8 @@ pub(crate) fn gen_unit_contiguous<T: Cell>(
         })
         .collect();
 
-    // Phase 2: close the gaps so the kept points are contiguous.
-    compact_blocks(buf, caps, &used)
+    // Phase 2: fill the gaps so the kept points are contiguous.
+    fill_gaps(buf, caps, &used)
 }
 
 /// Generates the points of a pass without tradeoff, scanning `scan_len`
@@ -1080,13 +1106,13 @@ mod prescan_tests {
     }
 }
 
-// Tests of compact_blocks (no generator is involved).
+// Tests of fill_gaps (no generator is involved).
 #[cfg(test)]
-mod compact_tests {
+mod fill_gaps_tests {
     use super::*;
 
-    /// Checks that compact_blocks concatenates the used prefixes of the
-    /// regions.
+    /// Checks that fill_gaps gathers the used prefixes of the regions at the
+    /// start of the buffer, moving no point that is already there.
     fn check(caps: &[usize], used: &[usize]) {
         let cap_total: usize = caps.iter().sum();
         // Used elements are distinct, and the others are u64::MAX.
@@ -1101,29 +1127,57 @@ mod compact_tests {
             }
             base += cap;
         }
-        let total = compact_blocks::<u64>(&mut buf, caps, used);
+        let before = buf.clone();
+        let total = fill_gaps::<u64>(&mut buf, caps, used);
         assert_eq!(
             total,
             used.iter().sum::<usize>(),
             "total for {caps:?}/{used:?}"
         );
-        assert_eq!(
-            &buf[..total],
-            &expected[..],
-            "compacted for {caps:?}/{used:?}"
-        );
+        for (p, &v) in before[..total].iter().enumerate() {
+            if v != u64::MAX {
+                assert_eq!(buf[p], v, "point at {p} moved for {caps:?}/{used:?}");
+            }
+        }
+        let mut got = buf[..total].to_vec();
+        got.sort_unstable();
+        expected.sort_unstable();
+        assert_eq!(got, expected, "points for {caps:?}/{used:?}");
     }
 
     #[test]
-    fn test_compaction_cases() {
+    fn test_fill_gaps_cases() {
         check(&[5, 5, 5], &[5, 5, 5]); // all full: plain no-op
         check(&[5, 5, 5], &[3, 4, 2]); // generic gaps
         check(&[5, 5, 5], &[0, 4, 2]); // first empty
         check(&[5, 5, 5], &[3, 0, 2]); // middle empty
         check(&[5, 5, 5], &[3, 4, 0]); // last empty
         check(&[5, 5, 5], &[0, 0, 0]); // all empty
-        check(&[10, 1, 7], &[1, 1, 7]); // big leftward shift, full last block
+        check(&[10, 1, 7], &[1, 1, 7]); // large gap, full last block
+        check(&[10, 10], &[1, 10]); // a gap filled by a single block
+        check(&[3, 3, 3, 3], &[1, 1, 3, 3]); // a block straddling n
         check(&[4], &[2]); // single block
         check(&[0, 5, 0, 3], &[0, 5, 0, 3]); // zero-capacity sub-regions
+    }
+
+    #[test]
+    fn test_fill_gaps_random() {
+        // A deterministic xorshift generator, to avoid a dependency.
+        let mut x = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |bound: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % bound
+        };
+        for _ in 0..10_000 {
+            let regions = 1 + next(8) as usize;
+            let caps: Vec<usize> = (0..regions).map(|_| next(12) as usize).collect();
+            let used: Vec<usize> = caps
+                .iter()
+                .map(|&cap| next(cap as u64 + 1) as usize)
+                .collect();
+            check(&caps, &used);
+        }
     }
 }

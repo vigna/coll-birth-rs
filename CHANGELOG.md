@@ -12,6 +12,15 @@
   only dimension accepted is the weight of the relation (3, 5, 8, 16, and 23 at
   the respective luxury levels).
 
+### Changed
+
+- Parallel runs now make the points of a pass contiguous by filling the gaps
+  between thread regions with the points beyond the final count, instead of
+  shifting the regions leftward, which is much faster.
+
+- The birthday-spacings test now reports the time of the sort and count of each
+  spacing class.
+
 ## [0.3.2] 2026-10-24
 
 ### New

@@ -301,8 +301,14 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
             }
         }
 
+        // Sorting a class can take as long as an interval, so we report
+        // progress.
+        let mut csw = Stopwatch::new();
+        eprint!("  Class {}/{}, spacings: sort...", j + 1, num_passes);
         T::sort_st(&mut class_buf[..class_len]);
+        eprint!("[{:.3}s] count...", csw.lap());
         let class_coll = count_adjacent_equals(&class_buf[..class_len]);
+        eprintln!("[{:.3}s]", csw.lap());
         total_coll += class_coll;
         let classes_done = (j - pass_lo + 1) as f64;
         let elapsed = class_sw.lap();
@@ -606,8 +612,14 @@ pub fn run_birthday_parallel<T: Cell>(
                     }
                 }
             }
+            // Sorting a class can take as long as an interval, so we report
+            // progress.
+            let mut csw = Stopwatch::new();
+            eprint!("  Class {}/{}, spacings: sort...", j + 1, num_passes);
             T::sort_mt(&mut class[..class_len]);
+            eprint!("[{:.3}s] count...", csw.lap());
             let class_coll = count_adjacent_equals(&class[..class_len]);
+            eprintln!("[{:.3}s]", csw.lap());
             rep_coll += class_coll;
             let classes_done = (j - pass_lo + 1) as f64;
             let elapsed = class_sw.lap();
