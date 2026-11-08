@@ -402,18 +402,21 @@ where blocks start. The _direct_ tests, instead, use the generator as it is,
 without `LACUNARY`, on consecutive outputs: with *t* = 48 a tuple covers two
 blocks of kept outputs, so it sees all relations between the blocks at once (at
 level 0 nothing is discarded, and *t* = 25 is enough). These are the results
-with seed zero and 10 cores, one failure for each level and kind of tuples:
+with seed zero, one failure for each level and kind of tuples:
 
 | Level | Tuples   | Test       | *u* | *t* | Points | Expected | Observed | *p*-value |
 |------:|:---------|:-----------|----:|----:|-------:|---------:|---------:|:----------|
 |     0 | Direct   | Collisions |   2 |  25 |    10⁹ |      444 |      892 | 5.85e-78  |
-|     0 | Lacunary | Birthday   |  17 |   3 |    10⁶ |      111 |   785436 | 0         |
+|     0 | Lacunary | Birthday   |  17 |   3 |    10⁶ |      111 |   785436 | ≤ 1e-307  |
 |     1 | Direct   | Collisions |   1 |  48 |    10⁹ |     1776 |     2026 | 3.64e-9   |
-|     1 | Lacunary | Collisions |   8 |   5 |    10⁷ |       45 |     4954 | 0         |
+|     1 | Lacunary | Collisions |   8 |   5 |    10⁷ |       45 |     4954 | ≤ 1e-307  |
 |     2 | Lacunary | Collisions |   6 |   8 |    10⁸ |       18 |      194 | 4.09e-127 |
+|     3 | Lacunary | Birthday   |   6 |  16 |    2³⁸ |    65536 |    67147 | 1.85e-10  |
 
-Here a *p*-value of zero means that the value underflowed, and each test takes
-less than 20 seconds. For example:
+Here *p* ≤ 1e-307 means that the tool printed 1e-307, its smallest *p*-value,
+which stands for any value at most 1e-307, including those that underflowed
+(similarly, 1 − 1e-307 stands for any value at least 1 − 1e-307). The tests at
+levels 0–2 take less than 20 seconds each on 10 cores. For example:
 
 ```text
 cargo run -r -F ranlux_1,LACUNARY -- 8 5 10000000 -P
@@ -421,21 +424,23 @@ Generator: RANLUX (luxury level 1, p = 48), lacunary tuples (0, 10, 14, 48, 58)
 Seed: 0x0000000000000000
 Running a 5-dimensional collision test using 10 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (10000000 points, 64-bit cells, 10000000 memory locations, 0.075 GiB RAM)
 u: 8 t: 5 cells: 1099511627776 expected collisions: 45.4745926780923
-Pass 1/1: gen...[0.178s] sort...[0.015s] count...[0.001s], 10000000 points, 4954 collisions, p=0
-4954	p=0
+Pass 1/1: gen...[0.178s] sort...[0.015s] count...[0.001s], 10000000 points, 4954 collisions, p=1e-307
+4954	p=1e-307
 Test completed in 0.20 seconds
-4954	p=0
+4954	p=1e-307
 ```
 
-Thus, luxury levels 0 and 1 fail direct tests, and luxury level 2 fails targeted
-tests. We estimate that a direct failure at level 2 would require a
+Thus, luxury levels 0 and 1 fail direct tests, and luxury levels 2 and 3 fail
+targeted tests. We estimate that a direct failure at level 2 would require a
 birthday-spacings test with *u* = 2 and *t* = 48 on about 2⁴² points, that is,
 about 120 TB of RAM, or about ten years on a 192-core machine with 752 GiB of
-RAM using a space-time tradeoff. No test has detected luxury level 3: the tests
-we completed are too small to tell anything, as with *u* = 3 the rounding noise
-hides the relation, and direct tests with *t* = 16 cannot see it at all, as it
-spans 46 kept outputs. Luxury level 4 has not been tested, and its coefficients
-require more than 128 bits of cell index.
+RAM using a space-time tradeoff. The test at luxury level 3, the default, needs
+a space-time tradeoff, too (`cargo run -r -F ranlux_3,LACUNARY -- 6 16
+17179869184 -B -b 4 -P`), and took 2.4 days on a 192-core machine with 514 GiB
+of RAM; direct tests cannot see the relation at level 3, as it spans 46 kept
+outputs.
+Luxury level 4 has not been tested, and its coefficients require more than 128
+bits of cell index.
 
 # Acknowledgments
 

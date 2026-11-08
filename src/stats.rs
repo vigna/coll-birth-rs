@@ -370,37 +370,40 @@ pub fn p_value(coll: f64, null: Null) -> PValue {
     }
 }
 
+/// The smallest tail probability that [`format_p_value`] prints as such.
+///
+/// Smaller tails, including those that underflowed to zero, are printed as this
+/// value, which thus means “at most 10⁻³⁰⁷”. Clamping, rather than
+/// special-casing zero, keeps the printed values ordered as the actual ones
+/// (otherwise a representable 5 · 10⁻³⁰⁸ would print below an underflowed
+/// tail), and folds in the subnormal range, where precision is lost anyway.
+pub const P_FLOOR: f64 = 1e-307;
+
 /// Formats a *p*-value, optionally rendering values close to 1 as `1 − ε` for
 /// readability (and at full precision, however small ε is).
+///
+/// No *p*-value is printed as 0 or 1, which would read as a degenerate value: a
+/// right tail below [`P_FLOOR`] prints as `1e-307`, and a left tail below
+/// [`P_FLOOR`] as `1 − 1e-307`. A left tail so small that 1 − ε rounds to 1 is
+/// printed as `1 − ε` also when `pretty_p` is false.
 pub fn format_p_value(p: PValue, pretty_p: bool) -> Cow<'static, str> {
     match p {
         PValue::Direct(v) => {
-            if v == 0.0 {
-                "0".into()
+            if v < P_FLOOR {
+                "1e-307".into()
             } else if v == 1.0 {
                 "1".into()
             } else {
                 format!("{v:?}").into()
             }
         }
-        // Value is 1 − eps. When eps underflowed to 0 the left tail is below the
-        // f64 range, yet the count is still a left-tail anomaly: print a sentinel
-        // just below 1 (`1 − 1e-307`, regardless of pretty mode) rather than a bare
-        // "1", which would read as a perfect/degenerate value. Otherwise pretty
-        // mode prints the tail exactly, and plain mode falls back to the decimal
-        // 1 − eps (which may itself round to "1" for tiny eps).
         PValue::NearOne(eps) => {
-            if eps == 0.0 {
+            if eps < P_FLOOR {
                 "1 − 1e-307".into()
-            } else if pretty_p && eps < 1e-4 {
+            } else if (pretty_p && eps < 1e-4) || 1.0 - eps == 1.0 {
                 format!("1 − {eps:?}").into()
             } else {
-                let v = 1.0 - eps;
-                if v == 1.0 {
-                    "1".into()
-                } else {
-                    format!("{v:?}").into()
-                }
+                format!("{:?}", 1.0 - eps).into()
             }
         }
     }
@@ -439,6 +442,43 @@ mod tests {
         assert_eq!(
             format_p_value(p_value(0.0, Null::poisson(750.0)), false),
             "1 − 1e-307"
+        );
+    }
+
+    // When the right tail underflows, we print the sentinel `1e-307`, never 0.
+    #[test]
+    fn test_underflowed_right_tail_prints_sentinel() {
+        let p = p_value(10_000.0, Null::poisson(1.0));
+        assert!(
+            matches!(p, PValue::Direct(v) if v == 0.0),
+            "the right tail must underflow for this test to be meaningful"
+        );
+        assert_eq!(format_p_value(p, true), "1e-307");
+        assert_eq!(format_p_value(p, false), "1e-307");
+    }
+
+    // Tails below P_FLOOR print as the sentinels, so that the printed values are
+    // ordered as the actual ones.
+    #[test]
+    fn test_tails_below_floor_print_sentinels() {
+        for tail in [5e-308, 1e-320, f64::MIN_POSITIVE] {
+            for pretty in [false, true] {
+                assert_eq!(format_p_value(PValue::Direct(tail), pretty), "1e-307");
+                assert_eq!(format_p_value(PValue::NearOne(tail), pretty), "1 − 1e-307");
+            }
+        }
+        assert_eq!(format_p_value(PValue::Direct(P_FLOOR), false), "1e-307");
+        assert_eq!(format_p_value(PValue::Direct(2e-307), false), "2e-307");
+    }
+
+    // A left tail so small that 1 − ε rounds to 1 prints as 1 − ε in plain mode,
+    // too, never as a bare 1.
+    #[test]
+    fn test_tiny_left_tail_never_prints_one() {
+        assert_eq!(format_p_value(PValue::NearOne(1e-20), false), "1 − 1e-20");
+        assert_eq!(
+            format_p_value(PValue::NearOne(1e-4), false),
+            format!("{:?}", 1.0 - 1e-4)
         );
     }
 

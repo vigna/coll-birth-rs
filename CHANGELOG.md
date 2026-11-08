@@ -21,6 +21,10 @@
 - The birthday-spacings test now reports the time of the sort and count of each
   spacing class.
 
+- *p*-values are never printed as 0 or 1: tails smaller than 1e-307, including
+  those that underflow, are printed as 1e-307 or 1 − 1e-307, and left tails so
+  small that 1 − ε rounds to 1 are printed as 1 − ε also without `-p`.
+
 ## [0.3.2] 2026-10-24
 
 ### New
