@@ -17,7 +17,7 @@ use num::traits::ToPrimitive;
 use rayon::prelude::*;
 
 use crate::birthday::{run_birthday, run_birthday_tradeoff};
-use crate::cell::{Cell, cell_index, decimate_once};
+use crate::cell::{Cell, cell_index, decimate_once, draw_keyed};
 use crate::cli::Args;
 use crate::collision::{run_collision, run_collision_decimate, run_collision_tradeoff};
 use crate::prng::Prng;
@@ -229,6 +229,18 @@ impl GridParams<'_> {
     ) -> Option<T> {
         decimate_once::<T, DIM, FULL>(prng, self.t, self.u, self.s, self.d)
     }
+
+    /// Draws a sample from `prng` and returns its cell index if its top `b`
+    /// bits are equal to `key` (see [`draw_keyed`]).
+    #[inline]
+    pub fn draw_keyed<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
+        &self,
+        prng: &mut Prng,
+        b: usize,
+        key: u64,
+    ) -> Option<T> {
+        draw_keyed::<T, DIM, DECIMATE, FULL>(prng, self.t, self.u, self.s, self.d, b, key)
+    }
 }
 
 /// Returns the number of pairs of adjacent equal elements of a sorted slice,
@@ -270,33 +282,57 @@ pub(crate) fn count_adjacent_equals<T: Cell>(v: &[T]) -> usize {
     within + borders
 }
 
-/// Merges the sorted slice `src` into the sorted prefix `buf[..prefix_len]`,
-/// leaving the result in `buf[..prefix_len + src.len()]`.
+/// Returns the number of distinct values of the sorted slice `stage` that do
+/// not occur in any of the sorted slices `runs`.
+///
+/// The number of collisions of a multiset (the number of elements minus the
+/// number of distinct elements, see [`count_adjacent_equals`]) can thus be
+/// maintained as sorted runs are added: adding `stage` to the union of `runs`
+/// increases it by `stage.len()` minus the returned value. In this way,
+/// checkpoints need not merge runs into a single sorted sequence, which would
+/// rewrite all the points seen so far at each checkpoint.
 ///
 /// # Implementation Details
 ///
-/// The merge proceeds right to left, so it never overwrites an element of the
-/// prefix that has not been read yet, and no additional space is needed. When
-/// `src` is exhausted, the remaining elements of the prefix are in place.
-pub(crate) fn merge_into<T: Cell>(buf: &mut [T], prefix_len: usize, src: &[T]) {
-    let mut i = prefix_len;
-    let mut j = src.len();
-    let mut w = i + j;
-    while i > 0 && j > 0 {
-        w -= 1;
-        if buf[i - 1] >= src[j - 1] {
-            i -= 1;
-            buf[w] = buf[i];
-        } else {
-            j -= 1;
-            buf[w] = src[j];
-        }
+/// `stage` is split into chunks that are processed in parallel. Each chunk
+/// locates by binary search the range of each run between its smallest and
+/// largest values, and marks the elements occurring in the range by a linear
+/// scan. Runs are only read, and each run is scanned once overall.
+pub(crate) fn count_new_distinct<T: Cell>(runs: &[&[T]], stage: &[T]) -> usize {
+    if stage.is_empty() {
+        return 0;
     }
-    while j > 0 {
-        w -= 1;
-        j -= 1;
-        buf[w] = src[j];
-    }
+    let chunk_size = (stage.len() / (parallelism() * 8)).max(4096);
+    stage
+        .par_chunks(chunk_size)
+        .enumerate()
+        .map(|(c, chunk)| {
+            let base = c * chunk_size;
+            let (lo, hi) = (chunk[0], chunk[chunk.len() - 1]);
+            let mut seen = vec![false; chunk.len()];
+            for run in runs {
+                let start = run.partition_point(|&x| x < lo);
+                let end = run.partition_point(|&x| x <= hi);
+                let run = &run[start..end];
+                let (mut i, mut j) = (0, 0);
+                while i < chunk.len() && j < run.len() {
+                    match chunk[i].cmp(&run[j]) {
+                        std::cmp::Ordering::Less => i += 1,
+                        std::cmp::Ordering::Greater => j += 1,
+                        std::cmp::Ordering::Equal => {
+                            seen[i] = true;
+                            i += 1;
+                        }
+                    }
+                }
+            }
+            // A value is counted at its first occurrence in stage, which might
+            // lie in a previous chunk.
+            (0..chunk.len())
+                .filter(|&i| !seen[i] && (base + i == 0 || stage[base + i - 1] != chunk[i]))
+                .count()
+        })
+        .sum()
 }
 
 /// A partition of the orbit of the generator among threads.
@@ -628,6 +664,58 @@ pub(crate) fn gen_unit_contiguous<T: Cell>(
     fill_gaps(buf, caps, &used)
 }
 
+/// The number of independent lanes in which a thread scans its samples (see
+/// [`scan_lanes`]).
+const LANES: usize = 4;
+
+/// Scans `len` samples of *t* outputs starting from `prng`, calling `f` once for
+/// each sample with the state from which the sample must be drawn, and leaves in
+/// `prng` the state after the scan.
+///
+/// # Implementation Details
+///
+/// If the generator can jump ahead and `len` is large enough, the samples are
+/// split into [`LANES`] contiguous ranges that are scanned in an interleaved
+/// fashion, starting from states obtained by jump-ahead: the state transitions
+/// of different lanes are independent, so the processor can overlap their
+/// latencies, which bound the speed of generators whose transition is a long
+/// dependency chain (e.g., a multiplication). The samples are the same, but
+/// they are presented to `f` in a different order, which does not matter as
+/// all callers store them unsorted.
+#[inline(always)]
+fn scan_lanes(prng: &mut Prng, len: usize, t: usize, mut f: impl FnMut(&mut Prng)) {
+    if len >= LANES * 1024 {
+        let base = len / LANES;
+        let rem = len % LANES;
+        let mut lanes = [*prng; LANES];
+        let mut ok = true;
+        let mut start = 0usize;
+        for (l, lane) in lanes.iter_mut().enumerate() {
+            if start > 0 && lane.try_skip((start * t) as u64).is_err() {
+                ok = false;
+                break;
+            }
+            start += base + usize::from(l < rem);
+        }
+        if ok {
+            for _ in 0..base {
+                for lane in lanes.iter_mut() {
+                    f(lane);
+                }
+            }
+            // The first rem lanes have one more sample.
+            for lane in lanes.iter_mut().take(rem) {
+                f(lane);
+            }
+            *prng = lanes[LANES - 1];
+            return;
+        }
+    }
+    for _ in 0..len {
+        f(prng);
+    }
+}
+
 /// Generates the points of a pass without tradeoff, scanning `scan_len`
 /// samples, and returns the number of points written to `buf`.
 fn gen_plain<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
@@ -636,23 +724,24 @@ fn gen_plain<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
     buf: &mut [T],
     scan_len: usize,
 ) -> usize {
+    let mut len = 0usize;
     if DECIMATE {
         // Keep the accepted samples.
-        let mut len = 0usize;
-        for _ in 0..scan_len {
-            if let Some(x) = params.draw_decimate_once::<T, DIM, FULL>(prng) {
+        scan_lanes(prng, scan_len, params.t, |p| {
+            if let Some(x) = params.draw_decimate_once::<T, DIM, FULL>(p) {
                 *buf.get_mut(len)
                     .unwrap_or_else(|| bin_overflow("a parallel decimation chunk")) = x;
                 len += 1;
             }
-        }
-        len
+        });
     } else {
-        for x in buf[..scan_len].iter_mut() {
-            *x = params.draw::<T, DIM, FULL>(prng);
-        }
-        scan_len
+        let buf = &mut buf[..scan_len];
+        scan_lanes(prng, scan_len, params.t, |p| {
+            buf[len] = params.draw::<T, DIM, FULL>(p);
+            len += 1;
+        });
     }
+    len
 }
 
 /// Generates the points of a tradeoff pass, scanning `stream_len` samples
@@ -683,23 +772,35 @@ fn gen_pass_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL
     };
 
     let mut local = snapshot;
-    let target = T::from_u64(pass);
     let mut len = 0usize;
-    for _ in 0..stream_len {
+    if b <= elem_width {
+        // The top b bits depend only on the first element of a tuple, so most
+        // samples are rejected after computing a single output.
+        scan_lanes(&mut local, stream_len, t, |p| {
+            if let Some(x) = params.draw_keyed::<T, DIM, DECIMATE, FULL>(p, b, pass) {
+                *buf.get_mut(len)
+                    .unwrap_or_else(|| bin_overflow("a tradeoff bin")) = x;
+                len += 1;
+            }
+        });
+        return (len, local);
+    }
+    let target = T::from_u64(pass);
+    scan_lanes(&mut local, stream_len, t, |p| {
         let x = if DECIMATE {
-            match params.draw_decimate_once::<T, DIM, FULL>(&mut local) {
+            match params.draw_decimate_once::<T, DIM, FULL>(p) {
                 Some(x) => x,
-                None => continue,
+                None => return,
             }
         } else {
-            params.draw::<T, DIM, FULL>(&mut local)
+            params.draw::<T, DIM, FULL>(p)
         };
         if key_of(x) == target {
             *buf.get_mut(len)
                 .unwrap_or_else(|| bin_overflow("a tradeoff bin")) = x;
             len += 1;
         }
-    }
+    });
     // The final state does not depend on the pass.
     (len, local)
 }
@@ -1178,6 +1279,87 @@ mod fill_gaps_tests {
                 .map(|&cap| next(cap as u64 + 1) as usize)
                 .collect();
             check(&caps, &used);
+        }
+    }
+}
+
+// Tests of count_new_distinct (no generator is involved).
+#[cfg(test)]
+mod count_new_distinct_tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    fn naive(runs: &[&[u64]], stage: &[u64]) -> usize {
+        let old: HashSet<u64> = runs.iter().flat_map(|r| r.iter().copied()).collect();
+        let new: HashSet<u64> = stage.iter().copied().filter(|x| !old.contains(x)).collect();
+        new.len()
+    }
+
+    #[test]
+    fn test_count_new_distinct_cases() {
+        assert_eq!(count_new_distinct::<u64>(&[], &[]), 0);
+        assert_eq!(count_new_distinct::<u64>(&[], &[1, 1, 2, 5, 5, 5]), 3);
+        assert_eq!(
+            count_new_distinct::<u64>(&[&[1, 5]], &[1, 1, 2, 5, 5, 5]),
+            1
+        );
+        assert_eq!(count_new_distinct::<u64>(&[&[], &[2]], &[1, 2]), 1);
+        assert_eq!(count_new_distinct::<u64>(&[&[0, 9]], &[1, 2, 3]), 3);
+    }
+
+    #[test]
+    fn test_count_new_distinct_random() {
+        // A deterministic xorshift generator, to avoid a dependency.
+        let mut x = 0x2545_f491_4f6c_dd1d_u64;
+        let mut next = |bound: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % bound
+        };
+        for _ in 0..200 {
+            let range = 1 + next(20_000);
+            let nruns = next(6) as usize;
+            let runs: Vec<Vec<u64>> = (0..nruns)
+                .map(|_| {
+                    let n = next(20_000) as usize;
+                    let mut r: Vec<u64> = (0..n).map(|_| next(range)).collect();
+                    r.sort_unstable();
+                    r
+                })
+                .collect();
+            // Stages larger than a chunk exercise values spanning chunks.
+            let n = next(50_000) as usize;
+            let mut stage: Vec<u64> = (0..n).map(|_| next(range)).collect();
+            stage.sort_unstable();
+            let refs: Vec<&[u64]> = runs.iter().map(|r| r.as_slice()).collect();
+            assert_eq!(count_new_distinct(&refs, &stage), naive(&refs, &stage));
+        }
+    }
+
+    // Maintaining collisions incrementally gives the count of the merged runs.
+    #[test]
+    fn test_incremental_collisions_match_merged_count() {
+        let mut x = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = |bound: u64| {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            x % bound
+        };
+        let mut all: Vec<u64> = Vec::new();
+        let mut runs: Vec<Vec<u64>> = Vec::new();
+        let mut c = 0usize;
+        for _ in 0..10 {
+            let mut stage: Vec<u64> = (0..10_000).map(|_| next(30_000)).collect();
+            stage.sort_unstable();
+            let refs: Vec<&[u64]> = runs.iter().map(|r| r.as_slice()).collect();
+            c += stage.len() - count_new_distinct(&refs, &stage);
+            all.extend_from_slice(&stage);
+            runs.push(stage);
+            let mut merged = all.clone();
+            merged.sort_unstable();
+            assert_eq!(c, count_adjacent_equals(&merged));
         }
     }
 }

@@ -7,6 +7,7 @@
 #![doc = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/README.md"))]
 
 pub mod birthday;
+pub(crate) mod buckets;
 pub mod cell;
 #[doc(hidden)]
 pub mod cli;

@@ -14,6 +14,27 @@
 
 ### Changed
 
+- Checkpoints (`-c`) no longer merge each stage into a sorted accumulator:
+  stages are stored as sorted runs, and the number of collisions is updated
+  incrementally by counting the values of the new stage that do not occur in
+  previous runs, in parallel. The merge, which was sequential and rewrote all
+  points at each checkpoint, dominated long checkpointed runs.
+
+- Parallel runners no longer sort a pass as a whole: the points are partitioned
+  in place into buckets by a digit, and each bucket is sorted and processed on
+  its own, in parallel. On many cores this is about twice as fast, as the
+  global data movement of the multithreaded radix sort was mostly sequential.
+
+- Each thread scans its samples in four interleaved ranges reached by
+  jump-ahead, so that the latencies of the state transitions overlap; this
+  makes generation up to 2.4 times faster for generators whose transition is a
+  long dependency chain, such as multiply-with-carry generators.
+
+- Tradeoff passes and decimation reject a sample as soon as its first
+  offending output is drawn, skipping the computation of the remaining outputs
+  of the tuple, which makes generation up to *t* times faster for generators
+  whose output is a function of the state.
+
 - Parallel runs now make the points of a pass contiguous by filling the gaps
   between thread regions with the points beyond the final count, instead of
   shifting the regions leftward, which is much faster.

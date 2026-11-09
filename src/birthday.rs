@@ -12,6 +12,7 @@ use num::BigUint;
 use num::traits::ToPrimitive;
 use rayon::prelude::*;
 
+use crate::buckets::{self, Sink};
 use crate::cell::Cell;
 use crate::cli::Args;
 use crate::common::{
@@ -382,6 +383,8 @@ pub fn run_birthday_parallel<T: Cell>(
     let decimating = d > 0;
     let full = args.u == 64 && args.s == 0;
     let partition_bits = t * d + b;
+    // The number of bits of a cell index.
+    let cell_bits = t * (args.u - d);
     let spacing_mask = T::low_bits_mask(b);
     // cells itself may be unrepresentable (2ᴺ in N-bit storage); cells − 1 always
     // is, and the wrap-around spacing is evaluated through it.
@@ -526,74 +529,132 @@ pub fn run_birthday_parallel<T: Cell>(
                     continue;
                 }
                 eprint!("[{:.3}s] sort...", isw.lap());
+                // The interval is partitioned into buckets by the top bits below
+                // those fixed by the interval, and then each bucket is sorted
+                // and its spacings filtered on its own (see the buckets module);
+                // the interval is sorted as a whole only if buckets cannot be
+                // used.
                 let interval: &mut [T] = &mut unit[..total];
-                T::sort_mt(interval);
-                let interval_max = interval[total - 1];
-                if global_min.is_none() {
-                    global_min = Some(interval[0]);
-                }
-                global_max = Some(interval_max);
-
-                eprint!("[{:.3}s] filter...", isw.lap());
-                // Copy the spacings of the class into the class buffer, in two
-                // parallel passes (count, then write). The first point of the
-                // first interval is skipped, as its spacing is the wrap-around
-                // one. Order is irrelevant, as the class buffer will be sorted.
-                let start = if prev_max.is_none() { 1 } else { 0 };
-                let interval: &[T] = interval;
-                let span = total - start;
-                let chunk_bounds = |c: usize| {
-                    (
-                        start + c * span / num_cpus,
-                        start + (c + 1) * span / num_cpus,
-                    )
-                };
-                let spacing_at = |i: usize| {
-                    if i == 0 {
-                        interval[0] - prev_max.unwrap()
-                    } else {
-                        interval[i] - interval[i - 1]
-                    }
-                };
-                // Pass 1: count matching spacings per chunk.
-                let counts: Vec<usize> = (0..num_cpus)
-                    .into_par_iter()
-                    .map(|c| {
-                        let (lo, hi) = chunk_bounds(c);
-                        (lo..hi)
-                            .filter(|&i| spacing_at(i) & spacing_mask == class_target)
-                            .count()
-                    })
-                    .collect();
-                let matched: usize = counts.iter().sum();
-                if class_len + matched > class.len() {
-                    bin_overflow("a birthday-spacings class");
-                }
-                // Pass 2: each chunk recomputes its matching spacings and
-                // writes them into its own slice of the class buffer.
-                {
-                    let mut rest = &mut class[class_len..class_len + matched];
-                    let mut dsts: Vec<&mut [T]> = Vec::with_capacity(num_cpus);
-                    for &cnt in &counts {
-                        let (head, tail) = rest.split_at_mut(cnt);
-                        dsts.push(head);
-                        rest = tail;
-                    }
-                    dsts.into_par_iter().enumerate().for_each(|(c, dst)| {
-                        let (lo, hi) = chunk_bounds(c);
-                        let mut w = 0usize;
-                        for i in lo..hi {
-                            let s = spacing_at(i);
-                            if s & spacing_mask == class_target {
-                                dst[w] = s;
+                let avail = cell_bits - b;
+                let k = buckets::digit_bits(total, avail);
+                let bk = (k > 0)
+                    .then(|| buckets::partition(interval, avail - k, k))
+                    .filter(|bk| bk.balanced(total));
+                if let Some(bk) = bk {
+                    eprint!("[{:.3}s] filter...", isw.lap());
+                    let sink = Sink::new(&mut class[class_len..]);
+                    // Each bucket copies the matching spacings between its
+                    // points into the class buffer, and returns its extremes.
+                    let extremes = bk.for_each_sorted(interval, |_, s| {
+                        let (&first, &last) = (s.first()?, s.last()?);
+                        let mut prev = first;
+                        let mut w = 0;
+                        for i in 1..s.len() {
+                            let cur = s[i];
+                            let spacing = cur - prev;
+                            prev = cur;
+                            // w < i, so we overwrite only points already read.
+                            if spacing & spacing_mask == class_target {
+                                s[w] = spacing;
                                 w += 1;
                             }
                         }
+                        sink.push_slice(&s[..w], "a birthday-spacings class");
+                        Some((first, last))
                     });
+                    // The spacings between consecutive nonempty buckets, the
+                    // first of which follows the maximum of the previous
+                    // interval. As before, the first point of the first interval
+                    // has no spacing, as its spacing is the wrap-around one.
+                    let mut borders = Vec::new();
+                    let mut prev = prev_max;
+                    for (first, last) in extremes.into_iter().flatten() {
+                        if global_min.is_none() {
+                            global_min = Some(first);
+                        }
+                        if let Some(p) = prev {
+                            let spacing = first - p;
+                            if spacing & spacing_mask == class_target {
+                                borders.push(spacing);
+                            }
+                        }
+                        prev = Some(last);
+                    }
+                    sink.push_slice(&borders, "a birthday-spacings class");
+                    class_len += sink.len();
+                    global_max = prev;
+                    prev_max = prev;
+                    eprintln!("[{:.3}s], {total} points", isw.lap());
+                } else {
+                    let interval: &mut [T] = &mut unit[..total];
+                    T::sort_mt(interval);
+                    let interval_max = interval[total - 1];
+                    if global_min.is_none() {
+                        global_min = Some(interval[0]);
+                    }
+                    global_max = Some(interval_max);
+
+                    eprint!("[{:.3}s] filter...", isw.lap());
+                    // Copy the spacings of the class into the class buffer, in two
+                    // parallel passes (count, then write). The first point of the
+                    // first interval is skipped, as its spacing is the wrap-around
+                    // one. Order is irrelevant, as the class buffer will be sorted.
+                    let start = if prev_max.is_none() { 1 } else { 0 };
+                    let interval: &[T] = interval;
+                    let span = total - start;
+                    let chunk_bounds = |c: usize| {
+                        (
+                            start + c * span / num_cpus,
+                            start + (c + 1) * span / num_cpus,
+                        )
+                    };
+                    let spacing_at = |i: usize| {
+                        if i == 0 {
+                            interval[0] - prev_max.unwrap()
+                        } else {
+                            interval[i] - interval[i - 1]
+                        }
+                    };
+                    // Pass 1: count matching spacings per chunk.
+                    let counts: Vec<usize> = (0..num_cpus)
+                        .into_par_iter()
+                        .map(|c| {
+                            let (lo, hi) = chunk_bounds(c);
+                            (lo..hi)
+                                .filter(|&i| spacing_at(i) & spacing_mask == class_target)
+                                .count()
+                        })
+                        .collect();
+                    let matched: usize = counts.iter().sum();
+                    if class_len + matched > class.len() {
+                        bin_overflow("a birthday-spacings class");
+                    }
+                    // Pass 2: each chunk recomputes its matching spacings and
+                    // writes them into its own slice of the class buffer.
+                    {
+                        let mut rest = &mut class[class_len..class_len + matched];
+                        let mut dsts: Vec<&mut [T]> = Vec::with_capacity(num_cpus);
+                        for &cnt in &counts {
+                            let (head, tail) = rest.split_at_mut(cnt);
+                            dsts.push(head);
+                            rest = tail;
+                        }
+                        dsts.into_par_iter().enumerate().for_each(|(c, dst)| {
+                            let (lo, hi) = chunk_bounds(c);
+                            let mut w = 0usize;
+                            for i in lo..hi {
+                                let s = spacing_at(i);
+                                if s & spacing_mask == class_target {
+                                    dst[w] = s;
+                                    w += 1;
+                                }
+                            }
+                        });
+                    }
+                    class_len += matched;
+                    eprintln!("[{:.3}s], {total} points", isw.lap());
+                    prev_max = Some(interval_max);
                 }
-                class_len += matched;
-                eprintln!("[{:.3}s], {total} points", isw.lap());
-                prev_max = Some(interval_max);
             }
 
             // The wrap-around spacing cells − max + min is equal to cells,
@@ -616,9 +677,13 @@ pub fn run_birthday_parallel<T: Cell>(
             // progress.
             let mut csw = Stopwatch::new();
             eprint!("  Class {}/{}, spacings: sort...", j + 1, num_passes);
-            T::sort_mt(&mut class[..class_len]);
-            eprint!("[{:.3}s] count...", csw.lap());
-            let class_coll = count_adjacent_equals(&class[..class_len]);
+            // Only equalities matter, so spacings are bucketed by the bits just
+            // above the b bits fixed by the class, which are close to uniform,
+            // whereas the top bits are not, as spacings cluster near zero.
+            let k = buckets::digit_bits(class_len, cell_bits.saturating_sub(b));
+            let class_coll = buckets::count_collisions(&mut class[..class_len], b, k, || {
+                eprint!("[{:.3}s] count...", csw.lap())
+            });
             eprintln!("[{:.3}s]", csw.lap());
             rep_coll += class_coll;
             let classes_done = (j - pass_lo + 1) as f64;

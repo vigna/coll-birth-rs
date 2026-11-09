@@ -11,12 +11,13 @@ use std::mem::size_of;
 use num::BigUint;
 use num::traits::ToPrimitive;
 
+use crate::buckets::count_collisions;
 use crate::cell::Cell;
 use crate::cli::Args;
 use crate::common::{
     GridParams, OrbitPartition, alloc_mmap, bin_overflow, bits_read_desc, buffer_size,
-    count_adjacent_equals, decimation_desc, effective_cells_suffix, gen_unit_contiguous,
-    generation_desc, headroom_desc, join_mode_parts, merge_into, null_desc, scan_samples,
+    count_adjacent_equals, count_new_distinct, decimation_desc, effective_cells_suffix,
+    gen_unit_contiguous, generation_desc, headroom_desc, join_mode_parts, null_desc, scan_samples,
     test_null,
 };
 use crate::prng::Prng;
@@ -236,9 +237,11 @@ pub fn run_collision_decimate<T: Cell, const DIM: usize, const FULL: bool>(
 
     // √2ᵗᵈ is computed in floating point because t · d might exceed 63.
     let num_checkpoints = (2.0f64.powf((t * d) as f64 / 2.0) as usize).clamp(1, scan_len);
-    let aux_cap = buffer_size(scan_len.div_ceil(num_checkpoints), t * d).max(1);
-    let mut aux: Vec<T> = vec![T::ZERO; aux_cap];
 
+    // The points of each stage are stored, sorted, after those of the previous
+    // stages, and collisions are counted incrementally (see
+    // count_new_distinct), so the runs are never merged.
+    let mut runs: Vec<std::ops::Range<usize>> = Vec::with_capacity(num_checkpoints);
     let mut len = 0usize; // cumulative kept points in `buf`
     let mut scanned = 0usize; // cumulative samples scanned
     let mut c = 0usize;
@@ -248,30 +251,26 @@ pub fn run_collision_decimate<T: Cell, const DIM: usize, const FULL: bool>(
         let mut sw = Stopwatch::new();
         eprint!("Checkpoint {}/{}: gen...", k, num_checkpoints);
 
-        let mut got = 0usize;
+        let mut got = len;
         for _ in 0..stage {
             if let Some(x) = params.draw_decimate_once::<T, DIM, FULL>(prng) {
-                *aux.get_mut(got)
-                    .unwrap_or_else(|| bin_overflow("a decimation checkpoint stage")) = x;
+                *buf.get_mut(got)
+                    .unwrap_or_else(|| bin_overflow("the decimation checkpoint accumulator")) = x;
                 got += 1;
             }
         }
         scanned = target_scanned;
         eprint!("[{:.3}s] sort...", sw.lap());
 
-        T::sort_mt(&mut aux[..got]);
-        eprint!("[{:.3}s] merge...", sw.lap());
-
-        // The headroom of buf is limited, so the merge might write past its
-        // end.
-        if len + got > buf.len() {
-            bin_overflow("the decimation checkpoint accumulator");
-        }
-        merge_into(buf, len, &aux[..got]);
-        len += got;
+        let (prev, rest) = buf.split_at_mut(len);
+        let run = &mut rest[..got - len];
+        T::sort_mt(run);
         eprint!("[{:.3}s] count...", sw.lap());
 
-        c = count_adjacent_equals(&buf[..len]);
+        let prev_runs: Vec<&[T]> = runs.iter().map(|r| &prev[r.clone()]).collect();
+        c += run.len() - count_new_distinct(&prev_runs, run);
+        runs.push(len..got);
+        len = got;
         let null = Null::collisions(len as f64, effective_cells);
         eprintln!(
             "[{:.3}s], {len} points, {} collisions\tp={}",
@@ -322,6 +321,8 @@ pub fn run_test_parallel<T: Cell>(
     let num_passes: u64 = 1u64 << tradeoff_b; // tradeoff passes (1 when none)
     // Decimation and tradeoff select points using t · d + b bits.
     let partition_bits = args.t * d + tradeoff_b;
+    // The number of bits of a cell index.
+    let cell_bits = args.t * (args.u - d);
 
     let output_type = bits_read_desc(args.s);
 
@@ -405,7 +406,9 @@ pub fn run_test_parallel<T: Cell>(
 
     // Checkpoints require decimation and exclude tradeoff, so there is a single
     // pass. The samples of each stage are split among threads, and the sorted
-    // points of the stage are merged into a sorted accumulator.
+    // points of each stage are stored after those of the previous stages;
+    // collisions are counted incrementally (see count_new_distinct), so the
+    // runs are never merged.
     if args.checkpoints {
         let effective_cells_f64 = cells.to_f64().unwrap();
         // ⌊√2ᵗᵈ⌋ stages, computed as in run_collision_decimate.
@@ -414,13 +417,16 @@ pub fn run_test_parallel<T: Cell>(
         let acc_cap = buffer_size(scan_total, partition_bits);
         let max_stage = scan_total.div_ceil(num_checkpoints);
         let thread_cap = buffer_size(max_stage.div_ceil(num_cpus) + 1, partition_bits).max(1);
-        // All thread regions in the stage buffer have the same capacity.
+        // All thread regions of a stage have the same capacity.
         let stage_caps: Box<[usize]> = vec![thread_cap; num_cpus].into_boxed_slice();
         let stage_buf_len = thread_cap * num_cpus;
         for rep in 1..=args.reps {
-            let mut acc = alloc_mmap::<T>(acc_cap);
+            // The regions of a stage start after the points of the previous
+            // stages, so the accumulator needs room for a whole stage beyond
+            // its own headroom (the same memory as a separate stage buffer).
+            let mut acc = alloc_mmap::<T>(acc_cap + stage_buf_len);
             let mut acc_len = 0usize;
-            let mut stage_mmap = alloc_mmap::<T>(stage_buf_len);
+            let mut runs: Vec<std::ops::Range<usize>> = Vec::with_capacity(num_checkpoints);
             let mut scanned = 0usize;
             let mut c = 0usize;
             for k in 1..=num_checkpoints {
@@ -441,12 +447,18 @@ pub fn run_test_parallel<T: Cell>(
                 let snapshots =
                     partition.snapshots((rep - 1) * scan_total + scanned, stage, &boundaries, None);
 
-                let stage_buf: &mut [T] = bytemuck::try_cast_slice_mut(&mut stage_mmap).unwrap();
+                let acc_slice: &mut [T] = bytemuck::try_cast_slice_mut(&mut acc).unwrap();
+                let stage_regions = thread_cap * stage_cpus;
+                // The accumulator has a limited headroom.
+                if acc_len + stage_regions > acc_slice.len() {
+                    bin_overflow("the checkpoint accumulator");
+                }
+                let (prev, rest) = acc_slice.split_at_mut(acc_len);
 
                 // Phase 1: generate the points of the stage into a contiguous
-                // buffer.
+                // run after the previous ones.
                 let stage_len = gen_unit_contiguous::<T>(
-                    stage_buf,
+                    &mut rest[..stage_regions],
                     &stage_caps[..stage_cpus],
                     &snapshots,
                     &params,
@@ -458,24 +470,17 @@ pub fn run_test_parallel<T: Cell>(
                 );
                 eprint!("[{:.3}s] sort...", psw.lap());
 
-                // Phase 2: sort the contiguous stage run.
-                T::sort_mt(&mut stage_buf[..stage_len]);
-                eprint!("[{:.3}s] merge...", psw.lap());
-
-                // Merge the stage into the sorted accumulator, so that each
-                // checkpoint requires just a linear scan.
-                let acc_slice: &mut [T] = bytemuck::try_cast_slice_mut(&mut acc).unwrap();
-                // The headroom of the accumulator is limited, so the merge
-                // might write past its end.
-                if acc_len + stage_len > acc_slice.len() {
-                    bin_overflow("the checkpoint accumulator");
-                }
-                merge_into(acc_slice, acc_len, &stage_buf[..stage_len]);
-                acc_len += stage_len;
-                scanned = target_scanned;
+                // Phase 2: sort the run.
+                let run = &mut rest[..stage_len];
+                T::sort_mt(run);
                 eprint!("[{:.3}s] count...", psw.lap());
 
-                c = count_adjacent_equals(&acc_slice[..acc_len]);
+                // Phase 3: update the number of collisions.
+                let prev_runs: Vec<&[T]> = runs.iter().map(|r| &prev[r.clone()]).collect();
+                c += stage_len - count_new_distinct(&prev_runs, run);
+                runs.push(acc_len..acc_len + stage_len);
+                acc_len += stage_len;
+                scanned = target_scanned;
                 let null_cp = Null::collisions(acc_len as f64, effective_cells_f64);
                 eprintln!(
                     "[{:.3}s], {acc_len} points, {c} collisions\tp={}",
@@ -535,13 +540,14 @@ pub fn run_test_parallel<T: Cell>(
             );
             eprint!("[{:.3}s] sort...", psw.lap());
 
-            // Phase 2: one sort over the whole contiguous unit.
-            T::sort_mt(&mut buf[..pass_points]);
-            eprint!("[{:.3}s] count...", psw.lap());
-
-            // Phase 3: count; since all points are sorted together, collisions
-            // between points generated by different threads are counted, too.
-            let c = count_adjacent_equals(&buf[..pass_points]);
+            // Phases 2 and 3: partition the whole unit into buckets by the top
+            // bits below those fixed by the pass, then sort and count each
+            // bucket (see count_collisions). Equal points share their bucket,
+            // so collisions between points generated by different threads are
+            // counted, too.
+            let c = count_collisions(&mut buf[..pass_points], 0, cell_bits - tradeoff_b, || {
+                eprint!("[{:.3}s] count...", psw.lap())
+            });
 
             // Statistics are printed as in run_collision_tradeoff.
             total_points += pass_points;

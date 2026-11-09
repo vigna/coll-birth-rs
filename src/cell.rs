@@ -35,6 +35,8 @@ pub trait Cell:
 
     fn from_u64(x: u64) -> Self;
     fn from_u128(x: u128) -> Self;
+    /// Returns the lowest 64 bits.
+    fn low_u64(self) -> u64;
 
     /// Returns a mask of the lowest *b* bits (all ones if *b* is at least the
     /// width of the type).
@@ -67,6 +69,10 @@ macro_rules! impl_cell {
             #[inline(always)]
             fn from_u128(x: u128) -> Self {
                 x as Self
+            }
+            #[inline(always)]
+            fn low_u64(self) -> u64 {
+                self as u64
             }
             #[inline(always)]
             fn low_bits_mask(b: usize) -> Self {
@@ -150,7 +156,10 @@ pub fn cell_index<T: Cell, const DIM: usize, const FULL: bool>(
 /// and in this case the index is the concatenation of the elements without
 /// their lowest *d* bits. Exactly *t* outputs are drawn in both cases, so
 /// sample *j* starts at offset *j* · *t* of the orbit, which makes jump-ahead
-/// possible. See [`cell_index`] for the other parameters.
+/// possible; however, the tuple is rejected as soon as an element has a nonzero
+/// low bit, and the remaining outputs are skipped, which for generators whose
+/// output is a function of the state costs just the state transition. See
+/// [`cell_index`] for the other parameters.
 #[inline]
 pub fn decimate_once<T: Cell, const DIM: usize, const FULL: bool>(
     prng: &mut Prng,
@@ -176,15 +185,90 @@ pub fn decimate_once<T: Cell, const DIM: usize, const FULL: bool>(
     let width = u - d;
 
     let first = extract::<FULL>(prng.next_u64(), combined_shift, extract_mask);
-    let mut rejected = first & dec_mask != 0;
+    if first & dec_mask != 0 {
+        // The tuple is rejected: we skip its remaining outputs, whose
+        // computation (but for the state transition) is optimized away.
+        skip_outputs(prng, t - 1);
+        return None;
+    }
     let mut x = T::from_u64(first >> d);
-    for _ in 1..t {
+    for i in 1..t {
         let raw = extract::<FULL>(prng.next_u64(), combined_shift, extract_mask);
-        rejected |= raw & dec_mask != 0;
+        if raw & dec_mask != 0 {
+            skip_outputs(prng, t - 1 - i);
+            return None;
+        }
         x <<= width;
         x ^= T::from_u64(raw >> d);
     }
-    if rejected { None } else { Some(x) }
+    Some(x)
+}
+
+/// Draws a sample from `prng` and returns its cell index if its top `b` bits
+/// are equal to `key`, or [`None`] otherwise; with `DECIMATE`, also rejected
+/// tuples return [`None`].
+///
+/// This is equivalent to drawing the index with [`cell_index`] or
+/// [`decimate_once`] and comparing its top `b` bits with `key`, but it
+/// requires `b` ≤ *u* − *d*, so that the top `b` bits depend only on the first
+/// element of the tuple: most samples are thus rejected after computing a
+/// single output. Exactly *t* outputs are drawn in all cases.
+#[inline]
+pub fn draw_keyed<T: Cell, const DIM: usize, const DECIMATE: bool, const FULL: bool>(
+    prng: &mut Prng,
+    t_rt: usize,
+    u: usize,
+    s: usize,
+    d: usize,
+    b: usize,
+    key: u64,
+) -> Option<T> {
+    let combined_shift = 64 - u - s;
+    let extract_mask: u64 = if u >= 64 { !0 } else { (1u64 << u) - 1 };
+
+    #[inline(always)]
+    fn extract<const FULL: bool>(raw: u64, combined_shift: usize, extract_mask: u64) -> u64 {
+        if FULL {
+            raw
+        } else {
+            (raw >> combined_shift) & extract_mask
+        }
+    }
+
+    let t = if DIM == 0 { t_rt } else { DIM };
+    let d = if DECIMATE { d } else { 0 };
+    let dec_mask: u64 = (1u64 << d) - 1;
+    let width = u - d;
+    debug_assert!(0 < b && b <= width);
+
+    let first = extract::<FULL>(prng.next_u64(), combined_shift, extract_mask);
+    if (DECIMATE && first & dec_mask != 0) || (first >> d) >> (width - b) != key {
+        skip_outputs(prng, t - 1);
+        return None;
+    }
+    let mut x = T::from_u64(first >> d);
+    for i in 1..t {
+        let raw = extract::<FULL>(prng.next_u64(), combined_shift, extract_mask);
+        if DECIMATE && raw & dec_mask != 0 {
+            skip_outputs(prng, t - 1 - i);
+            return None;
+        }
+        x <<= width;
+        x ^= T::from_u64(raw >> d);
+    }
+    Some(x)
+}
+
+/// Advances `prng` by `n` outputs.
+///
+/// The outputs are discarded, so for generators whose output is a function of
+/// the state (such as counter-based generators) the compiler removes their
+/// computation, and only the state transition is left.
+#[inline(always)]
+fn skip_outputs(prng: &mut Prng, n: usize) {
+    for _ in 0..n {
+        prng.next_u64();
+    }
 }
 
 #[cfg(test)]
@@ -255,6 +339,43 @@ mod tests {
             let full: u64 = cell_index::<u64, 1, true>(&mut a, 1, u, s);
             let shift: u64 = cell_index::<u64, 1, false>(&mut b, 1, u, s);
             assert_eq!(full, shift);
+        }
+    }
+
+    // draw_keyed must return the index drawn by cell_index or decimate_once
+    // when its top b bits are equal to the key, and None otherwise, leaving
+    // the generator in the same state.
+    #[test]
+    fn test_draw_keyed_matches_reference() {
+        for &(t, u, s, d, b) in &[
+            (3usize, 12usize, 0usize, 0usize, 2usize),
+            (3, 12, 0, 3, 2),
+            (2, 32, 0, 0, 5),
+            (2, 32, 4, 2, 30),
+            (1, 64, 0, 0, 3),
+            (1, 64, 0, 4, 1),
+        ] {
+            let width = u - d;
+            for key in 0..(1u64 << b).min(4) {
+                let mut a = Prng::new(0x5EED_0000 + key);
+                let mut r = a;
+                for _ in 0..5_000 {
+                    let got: Option<u128> = if d > 0 {
+                        draw_keyed::<u128, 0, true, false>(&mut a, t, u, s, d, b, key)
+                    } else {
+                        draw_keyed::<u128, 0, false, false>(&mut a, t, u, s, d, b, key)
+                    };
+                    let reference: Option<u128> = if d > 0 {
+                        decimate_once::<u128, 0, false>(&mut r, t, u, s, d)
+                    } else {
+                        Some(cell_index::<u128, 0, false>(&mut r, t, u, s))
+                    };
+                    let expected = reference.filter(|&x| (x >> (t * width - b)) as u64 == key);
+                    assert_eq!(got, expected, "t={t} u={u} s={s} d={d} b={b} key={key}");
+                    let (mut a2, mut r2) = (a, r);
+                    assert_eq!(a2.next_u64(), r2.next_u64(), "state diverged");
+                }
+            }
         }
     }
 }
