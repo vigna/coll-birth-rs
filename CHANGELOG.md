@@ -20,10 +20,12 @@
   previous runs, in parallel. The merge, which was sequential and rewrote all
   points at each checkpoint, dominated long checkpointed runs.
 
-- Parallel runners no longer sort a pass as a whole: the points are partitioned
-  in place into buckets by a digit, and each bucket is sorted and processed on
-  its own, in parallel. On many cores this is about twice as fast, as the
-  global data movement of the multithreaded radix sort was mostly sequential.
+- With at least 64 threads, parallel runners no longer sort a pass as a whole:
+  the points are partitioned in place into buckets by a digit, and each bucket
+  is sorted and processed on its own, in parallel. On many cores this is about
+  twice as fast, as the global data movement of the multithreaded radix sort
+  was mostly sequential. Progress lines then report the phases as
+  `partition...` and `sort+count...` (or `sort+filter...`).
 
 - Each thread scans its samples in four interleaved ranges reached by
   jump-ahead, so that the latencies of the state transitions overlap; this

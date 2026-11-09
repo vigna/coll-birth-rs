@@ -19,7 +19,7 @@
 
 use crate::cell::Cell;
 use crate::common::bin_overflow;
-use crate::util::parallelism;
+use crate::util::{Stopwatch, parallelism};
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -35,10 +35,23 @@ const MAX_DIGIT_BITS: usize = 16;
 /// The number of points below which buckets are not used.
 const MIN_POINTS: usize = 1 << 24;
 
+/// The number of threads below which buckets are not used.
+///
+/// Buckets pay off when the multithreaded radix sort cannot keep the cores
+/// busy: on 192 cores they halve the time of the sort, but on 10 cores the sort
+/// is faster (1.3 s instead of 2.2 s for 5 · 10⁸ random `u128`).
+const MIN_THREADS: usize = 64;
+
+/// The maximum number of digit bits handled by a single partition pass.
+///
+/// With few buckets the write positions stay in cache, and the partition runs
+/// at memory speed; with many buckets each swap incurs a cache (and TLB) miss.
+const PASS_BITS: usize = 7;
+
 /// Returns the number *k* of digit bits to use for `n` points, given that at
 /// most `avail` bits are available, or zero if buckets should not be used.
 pub(crate) fn digit_bits(n: usize, avail: usize) -> usize {
-    if n < MIN_POINTS {
+    if n < MIN_POINTS || parallelism() < MIN_THREADS {
         return 0;
     }
     let k = (n >> LOG_BUCKET_TARGET).max(1).ilog2() as usize;
@@ -70,45 +83,64 @@ pub(crate) struct Buckets {
     starts: Box<[Box<[usize]>]>,
 }
 
-/// Partitions `v` in place into 2ᵏ buckets by the digit of its points made of
-/// the bits from `shift` (included) to `shift` + *k* (excluded).
+/// Partitions `c` in place by the digit made of its bits from `shift`
+/// (included) to `shift` + *k* (excluded), and returns the start of each of the
+/// 2ᵏ buckets, plus the length of `c`.
 ///
 /// # Implementation Details
 ///
-/// `v` is divided into one chunk per thread, and each chunk is partitioned
-/// independently by an American-flag sort (in-place cycle leader), so no
-/// data moves between chunks.
-pub(crate) fn partition<T: Cell>(v: &mut [T], shift: usize, k: usize) -> Buckets {
-    let num_buckets = 1usize << k;
+/// The partition is an American-flag sort (in-place cycle leader) on the top
+/// [`PASS_BITS`] bits of the digit, followed, if there are more bits, by a
+/// recursive partition of each resulting bucket on the remaining bits.
+fn partition_chunk<T: Cell>(c: &mut [T], shift: usize, k: usize) -> Vec<usize> {
+    let bits = k.min(PASS_BITS);
+    let num_buckets = 1usize << bits;
     let mask = num_buckets - 1;
+    let pass_shift = shift + k - bits;
+    let mut start = vec![0usize; num_buckets + 1];
+    for &x in c.iter() {
+        start[digit(x, pass_shift, mask) + 1] += 1;
+    }
+    for g in 0..num_buckets {
+        start[g + 1] += start[g];
+    }
+    let mut next = start.clone();
+    for g in 0..num_buckets {
+        while next[g] < start[g + 1] {
+            let d = digit(c[next[g]], pass_shift, mask);
+            if d == g {
+                next[g] += 1;
+            } else {
+                c.swap(next[g], next[d]);
+                next[d] += 1;
+            }
+        }
+    }
+    if bits == k {
+        return start;
+    }
+    let mut starts = Vec::with_capacity((1 << k) + 1);
+    for g in 0..num_buckets {
+        let sub = partition_chunk(&mut c[start[g]..start[g + 1]], shift, k - bits);
+        starts.extend(sub[..sub.len() - 1].iter().map(|&s| start[g] + s));
+    }
+    starts.push(c.len());
+    starts
+}
+
+/// Partitions `v` in place into 2ᵏ buckets by the digit of its points made of
+/// the bits from `shift` (included) to `shift` + *k* (excluded).
+///
+/// `v` is divided into one chunk per thread, and each chunk is partitioned
+/// independently (see [`partition_chunk`]), so no data moves between chunks.
+pub(crate) fn partition<T: Cell>(v: &mut [T], shift: usize, k: usize) -> Buckets {
     let chunk_len = v.len().div_ceil(parallelism()).max(1);
     let starts: Box<[Box<[usize]>]> = v
         .par_chunks_mut(chunk_len)
-        .map(|c| {
-            let mut start = vec![0usize; num_buckets + 1].into_boxed_slice();
-            for &x in c.iter() {
-                start[digit(x, shift, mask) + 1] += 1;
-            }
-            for g in 0..num_buckets {
-                start[g + 1] += start[g];
-            }
-            let mut next = start.clone();
-            for g in 0..num_buckets {
-                while next[g] < start[g + 1] {
-                    let d = digit(c[next[g]], shift, mask);
-                    if d == g {
-                        next[g] += 1;
-                    } else {
-                        c.swap(next[g], next[d]);
-                        next[d] += 1;
-                    }
-                }
-            }
-            start
-        })
+        .map(|c| partition_chunk(c, shift, k).into_boxed_slice())
         .collect();
     Buckets {
-        num_buckets,
+        num_buckets: 1 << k,
         chunk_len,
         starts,
     }
@@ -169,17 +201,21 @@ impl Buckets {
 ///
 /// Points are bucketed by the top bits of their bits from `shift` (included)
 /// to `shift` + `avail` (excluded), which should be as close to uniform as
-/// possible; if there are too few points, too few bits, or the buckets are
-/// unbalanced, `v` is sorted with [`Cell::sort_mt`] instead. `between` is
-/// called after the partition (or the sort), so that the caller can time the
-/// two phases.
+/// possible; if there are too few points or threads, too few bits, or the
+/// buckets are unbalanced, `v` is sorted with [`Cell::sort_mt`] instead.
+///
+/// If `sw` is not [`None`], the phases are reported on standard error as
+/// `partition...[`*time*`] sort+count...` with buckets and as
+/// `sort...[`*time*`] count...` otherwise, each preceded by the time of the
+/// previous phase measured by `sw`, as in the other progress lines; the time of
+/// the last phase is left to the caller.
 pub(crate) fn count_collisions<T: Cell>(
     v: &mut [T],
     shift: usize,
     avail: usize,
-    between: impl FnOnce(),
+    sw: Option<&mut Stopwatch>,
 ) -> usize {
-    count_collisions_with(v, shift, avail, digit_bits(v.len(), avail), between)
+    count_collisions_with(v, shift, avail, digit_bits(v.len(), avail), sw)
 }
 
 /// Like [`count_collisions`], but using `k` digit bits (zero for no buckets).
@@ -188,20 +224,34 @@ fn count_collisions_with<T: Cell>(
     shift: usize,
     avail: usize,
     k: usize,
-    between: impl FnOnce(),
+    mut sw: Option<&mut Stopwatch>,
 ) -> usize {
+    let mut report = |label: &str, first: bool| {
+        if let Some(sw) = sw.as_deref_mut() {
+            let lap = sw.lap();
+            if first {
+                eprint!("{label}...");
+            } else {
+                eprint!("[{lap:.3}s] {label}...");
+            }
+        }
+    };
     if k > 0 {
+        report("partition", true);
         let buckets = partition(v, shift + avail - k, k);
         if buckets.balanced(v.len()) {
-            between();
+            report("sort+count", false);
             return buckets
                 .for_each_sorted(v, |_, s| s.windows(2).filter(|w| w[0] == w[1]).count())
                 .into_iter()
                 .sum();
         }
+        report("sort", false);
+    } else {
+        report("sort", true);
     }
     T::sort_mt(v);
-    between();
+    report("count", false);
     crate::common::count_adjacent_equals(v)
 }
 
@@ -282,7 +332,7 @@ mod tests {
             w.sort_unstable();
             let expected = crate::common::count_adjacent_equals(&w);
             assert_eq!(
-                count_collisions_with(&mut v, shift, avail, k, || ()),
+                count_collisions_with(&mut v, shift, avail, k, None),
                 expected,
                 "n={n} bits={bits} k={k}"
             );

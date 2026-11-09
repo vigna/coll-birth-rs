@@ -528,7 +528,7 @@ pub fn run_birthday_parallel<T: Cell>(
                     eprintln!("[{:.3}s] empty", isw.lap());
                     continue;
                 }
-                eprint!("[{:.3}s] sort...", isw.lap());
+                eprint!("[{:.3}s] ", isw.lap());
                 // The interval is partitioned into buckets by the top bits below
                 // those fixed by the interval, and then each bucket is sorted
                 // and its spacings filtered on its own (see the buckets module);
@@ -537,11 +537,14 @@ pub fn run_birthday_parallel<T: Cell>(
                 let interval: &mut [T] = &mut unit[..total];
                 let avail = cell_bits - b;
                 let k = buckets::digit_bits(total, avail);
+                if k > 0 {
+                    eprint!("partition...");
+                }
                 let bk = (k > 0)
                     .then(|| buckets::partition(interval, avail - k, k))
                     .filter(|bk| bk.balanced(total));
                 if let Some(bk) = bk {
-                    eprint!("[{:.3}s] filter...", isw.lap());
+                    eprint!("[{:.3}s] sort+filter...", isw.lap());
                     let sink = Sink::new(&mut class[class_len..]);
                     // Each bucket copies the matching spacings between its
                     // points into the class buffer, and returns its extremes.
@@ -586,6 +589,11 @@ pub fn run_birthday_parallel<T: Cell>(
                     prev_max = prev;
                     eprintln!("[{:.3}s], {total} points", isw.lap());
                 } else {
+                    if k > 0 {
+                        eprint!("[{:.3}s] sort...", isw.lap());
+                    } else {
+                        eprint!("sort...");
+                    }
                     let interval: &mut [T] = &mut unit[..total];
                     T::sort_mt(interval);
                     let interval_max = interval[total - 1];
@@ -676,14 +684,13 @@ pub fn run_birthday_parallel<T: Cell>(
             // Sorting a class can take as long as an interval, so we report
             // progress.
             let mut csw = Stopwatch::new();
-            eprint!("  Class {}/{}, spacings: sort...", j + 1, num_passes);
+            eprint!("  Class {}/{}, spacings: ", j + 1, num_passes);
             // Only equalities matter, so spacings are bucketed by the bits just
             // above the b bits fixed by the class, which are close to uniform,
             // whereas the top bits are not, as spacings cluster near zero.
             let k = buckets::digit_bits(class_len, cell_bits.saturating_sub(b));
-            let class_coll = buckets::count_collisions(&mut class[..class_len], b, k, || {
-                eprint!("[{:.3}s] count...", csw.lap())
-            });
+            let class_coll =
+                buckets::count_collisions(&mut class[..class_len], b, k, Some(&mut csw));
             eprintln!("[{:.3}s]", csw.lap());
             rep_coll += class_coll;
             let classes_done = (j - pass_lo + 1) as f64;
