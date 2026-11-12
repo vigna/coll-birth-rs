@@ -1027,6 +1027,40 @@ impl Prng {
     }
 }
 
+// ----- Sirius64 ------------------------------------------------------------------
+//
+// https://github.com/matteo65/Sirius64 (local addition, not committed)
+
+#[cfg(feature = "sirius64")]
+#[derive(Clone, Copy)]
+pub struct Prng {
+    x: u64,
+}
+
+#[cfg(feature = "sirius64")]
+impl Prng {
+    pub const NAME: &str = "Sirius64";
+    pub fn new(seed: u64) -> Self {
+        Self { x: seed }
+    }
+
+    #[inline(always)]
+    pub fn next_u64(&mut self) -> u64 {
+        const PHI: u64 = 0x9e3779b97f4a7c15;
+        self.x = self.x.wrapping_add(PHI);
+        let mut z = self.x;
+        z = PHI.wrapping_mul(z ^ (z >> 17));
+        z = z.rotate_left(32);
+        PHI.wrapping_mul(self.x ^ z ^ (z >> 17))
+    }
+
+    pub fn try_skip(&mut self, n: u64) -> Result<(), ()> {
+        const PHI: u64 = 0x9e3779b97f4a7c15;
+        self.x = self.x.wrapping_add(n.wrapping_mul(PHI));
+        Ok(())
+    }
+}
+
 // ----- Trivial counters (sanity/baseline) ---------------------------------------------
 
 #[cfg(feature = "incr")]
