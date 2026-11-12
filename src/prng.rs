@@ -1029,7 +1029,7 @@ impl Prng {
 
 // ----- Sirius64 ------------------------------------------------------------------
 //
-// https://github.com/matteo65/Sirius64 (local addition, not committed)
+// https://github.com/matteo65/Sirius64
 
 #[cfg(feature = "sirius64")]
 #[derive(Clone, Copy)]
