@@ -175,12 +175,12 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 64 bits of the full 64-bit output (32000000000 points, 64-bit cells, 8000000000 memory locations, 59.807 GiB RAM (+0.34%), tradeoff on 2 top bits over 4 passes)
 u: 64 t: 1 cells: 18446744073709551616 expected collisions: 27.755575598712134
-Pass 1/4: gen...[12.575s] sort...[25.045s] count...[1.047s], 7999983191 points, 0 collisions, p=0.9990306305409877; combined: 7999983191 points, 0 collisions, p=0.9990306305409877
-Pass 2/4: gen...[12.543s] sort...[21.221s] count...[1.048s], 7999927485 points, 0 collisions, p=0.9990305368624458; combined: 15999910676 points, 0 collisions, p=1 − 9.39767956526281e-7
-Pass 3/4: gen...[12.678s] sort...[21.999s] count...[1.048s], 8000029665 points, 0 collisions, p=0.999030708688019; combined: 23999940341 points, 0 collisions, p=1 − 9.109089151127042e-10
-Pass 4/4: gen...[12.585s] sort...[21.952s] count...[1.050s], 8000059659 points, 0 collisions, p=0.9990307591204716; combined: 32000000000 points, 0 collisions, p=1 − 8.828901577425957e-13
+Pass 1/4: gen...[7.817s] sort...[23.403s] count...[1.048s], 7999983191 points, 0 collisions, p=0.9990306305409877; combined: 7999983191 points, 0 collisions, p=0.9990306305409877
+Pass 2/4: gen...[7.826s] sort...[21.457s] count...[1.050s], 7999927485 points, 0 collisions, p=0.9990305368624458; combined: 15999910676 points, 0 collisions, p=1 − 9.39767956526281e-7
+Pass 3/4: gen...[7.812s] sort...[22.166s] count...[1.048s], 8000029665 points, 0 collisions, p=0.999030708688019; combined: 23999940341 points, 0 collisions, p=1 − 9.109089151127042e-10
+Pass 4/4: gen...[7.974s] sort...[22.127s] count...[1.050s], 8000059659 points, 0 collisions, p=0.9990307591204716; combined: 32000000000 points, 0 collisions, p=1 − 8.828901577425957e-13
 0	p=1 − 8.828901577425957e-13
-Test completed in 146.49 seconds
+Test completed in 126.49 seconds
 0	p=1 − 8.828901577425957e-13
 ```
 
@@ -204,9 +204,9 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 64 bits of the full 64-bit output (8000000000 points, 64-bit cells, 8000000000 memory locations, 59.807 GiB RAM (+0.34%), decimating 4 bits per dimension (~2⁴ candidate samples per kept sample))
 u: 64 t: 1 cells: 1152921504606846976 expected collisions: 27.755575547961804 (effective cells after decimation: 2⁶⁰)
-Pass 1/1: gen...[18.642s] sort...[26.335s] count...[1.048s], 7999985821 points, 0 collisions, p=1 − 8.829770712901635e-13
+Pass 1/1: gen...[15.241s] sort...[23.389s] count...[1.049s], 7999985821 points, 0 collisions, p=1 − 8.829770712901635e-13
 0	p=1 − 8.829770712901635e-13
-Test completed in 47.73 seconds
+Test completed in 41.39 seconds
 0	p=1 − 8.829770712901635e-13
 ```
 
@@ -224,14 +224,14 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 64 bits of the full 64-bit output (8000000000 points, 64-bit cells, 8000000000 memory locations, 59.605 GiB RAM)
 u: 64 t: 1 cells: 18446744073709551616 expected collisions: 1.7347234755091947
-Pass 1/1: gen...[1.605s] sort...[24.610s] count...[1.048s], 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.580s] sort...[23.329s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=0.8235510139931854
-Pass 1/1: gen...[1.609s] sort...[25.191s] count...[1.050s], 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.602s] sort...[23.339s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=0.968865755337167
 [...]
-Pass 1/1: gen...[1.609s] sort...[26.398s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854
+Pass 1/1: gen...[1.579s] sort...[23.432s] count...[1.049s], 8000000000 points, 0 collisions, p=0.8235510139931854
 0	p=0.8235510139931854	combined: 0	p=1 − 8.828901494125378e-13
-Test completed in 465.96 seconds
+Test completed in 444.22 seconds
 0	p=1 − 8.828901494125378e-13
 ```
 
@@ -279,12 +279,12 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 1-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 64 bits of the full 64-bit output (64000000000 points, 64-bit cells, 8000000000 memory locations, 59.807 GiB RAM (+0.34%), tradeoff on 3 top bits over 8 passes)
 u: 64 t: 1 cells: 18446744073709551616 expected collisions: 111.0223023323856
-Pass 1/8: gen...[13.200s] sort...[25.677s] count...[1.049s], 8000083095 points, 28 collisions, p=0.0005575160148976676; combined: 8000083095 points, 28 collisions, p=0.0005575160148976676
-Pass 2/8: gen...[13.214s] sort...[21.772s] count...[1.047s], 8000011384 points, 20 collisions, p=0.07162240780462378; combined: 16000094479 points, 48 collisions, p=0.0003042040178853015
+Pass 1/8: gen...[7.542s] sort...[23.430s] count...[1.052s], 8000083095 points, 28 collisions, p=0.0005575160148976676; combined: 8000083095 points, 28 collisions, p=0.0005575160148976676
+Pass 2/8: gen...[7.374s] sort...[21.403s] count...[1.049s], 8000011384 points, 20 collisions, p=0.07162240780462378; combined: 16000094479 points, 48 collisions, p=0.0003042040178853015
 [...]
-Pass 8/8: gen...[13.298s] sort...[22.828s] count...[1.049s], 8000119446 points, 22 collisions, p=0.026591939215130665; combined: 64000000000 points, 222 collisions, p=1.2959913978087028e-20
+Pass 8/8: gen...[7.375s] sort...[22.768s] count...[1.048s], 8000119446 points, 22 collisions, p=0.026591939215130665; combined: 64000000000 points, 222 collisions, p=1.2959913978087028e-20
 222	p=1.2959913978087028e-20
-Test completed in 298.37 seconds
+Test completed in 249.69 seconds
 222	p=1.2959913978087028e-20
 ```
 
@@ -315,12 +315,12 @@ Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
 Running a 2-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 32 bits of the full 64-bit output (64000000000 points, 64-bit cells, 8000000000 memory locations, 59.807 GiB RAM (+0.34%), tradeoff on 3 top bits over 8 passes)
 u: 32 t: 2 cells: 18446744073709551616 expected collisions: 111.0223023323856
-Pass 1/8: gen...[20.506s] sort...[26.332s] count...[1.050s], 8000076053 points, 3 collisions, p=0.9994770836776423; combined: 8000076053 points, 3 collisions, p=0.9994770836776423
-Pass 2/8: gen...[20.129s] sort...[21.184s] count...[1.053s], 8000194725 points, 4 collisions, p=0.9980257653489827; combined: 16000270778 points, 7 collisions, p=1 − 2.9280185095831245e-6
+Pass 1/8: gen...[8.379s] sort...[23.481s] count...[1.048s], 8000076053 points, 3 collisions, p=0.9994770836776423; combined: 8000076053 points, 3 collisions, p=0.9994770836776423
+Pass 2/8: gen...[8.571s] sort...[21.464s] count...[1.050s], 8000194725 points, 4 collisions, p=0.9980257653489827; combined: 16000270778 points, 7 collisions, p=1 − 2.9280185095831245e-6
 [...]
-Pass 8/8: gen...[19.392s] sort...[22.802s] count...[1.050s], 8000186794 points, 2 collisions, p=0.9998955967799726; combined: 64000000000 points, 16 collisions, p=1 − 1.804698905648335e-29
+Pass 8/8: gen...[8.373s] sort...[22.774s] count...[1.048s], 8000186794 points, 2 collisions, p=0.9998955967799726; combined: 64000000000 points, 16 collisions, p=1 − 1.804698905648335e-29
 16	p=1 − 1.804698905648335e-29
-Test completed in 353.10 seconds
+Test completed in 258.05 seconds
 16	p=1 − 1.804698905648335e-29
 ```
 
@@ -357,13 +357,14 @@ Seed: 0x0000000000000000
 Running a 3-dimensional birthday-spacings test using 20 parallel generators (jump-ahead) on the upper 36 bits of the full 64-bit output (128000000000 points, 128-bit cells, 2000000000 memory locations, 59.853 GiB RAM (+0.42%), tradeoff on 6 top bits over 64 value intervals x 64 spacing classes)
 u: 36 t: 3 cells: 324518553658426726783156020576256 expected collisions: 1.6155871338926322
 Rep 1/1: 64 value intervals x 64 spacing classes
-  Class 1/64, interval 1/64: gen...[90.838s] sort...[10.731s] filter...[1.067s], 2000034155 points
-  Class 1/64, interval 2/64: gen...[90.889s] sort...[10.882s] filter...[1.076s], 1999968926 points
+  Class 1/64, interval 1/64: gen...[16.565s] sort...[10.312s] filter...[1.073s], 2000034155 points
+  Class 1/64, interval 2/64: gen...[16.320s] sort...[10.809s] filter...[1.071s], 1999968926 points
 [...]
- Class 64/64, interval 64/64: gen...[57.182s] sort...[13.009s] filter...[1.105s], 2000023578 points
- Class 64/64 done: [6064.541s], 2000055256 spacings, 2 collisions, p=0.00031330676200791153; combined: 65 collisions, p=8.595346190145383e-79
-[392078.211s] 65	p=8.595346190145383e-79
-Test completed in 392079.89 seconds
+  Class 64/64, interval 64/64: gen...[16.298s] sort...[12.881s] filter...[1.090s], 2000023578 points
+  Class 64/64, spacings: sort...[12.088s] count...[0.525s]
+  Class 64/64 done: [1939.839s], 2000055256 spacings, 2 collisions, p=0.00031330676200791153; combined: 65 collisions, p=8.595346190145383e-79
+[124069.179s] 65	p=8.595346190145383e-79
+Test completed in 124070.96 seconds
 65	p=8.595346190145383e-79
 ```
 
@@ -416,17 +417,18 @@ with seed zero, one failure for each level and kind of tuples:
 Here *p* ≤ 1e-307 means that the tool printed 1e-307, its smallest *p*-value,
 which stands for any value at most 1e-307, including those that underflowed
 (similarly, 1 − 1e-307 stands for any value at least 1 − 1e-307). The tests at
-levels 0–2 take less than 20 seconds each on 10 cores. For example:
+levels 0–2 take less than 20 seconds each on a 20-thread workstation. For example:
 
 ```text
 cargo run -r -F ranlux_1,LACUNARY -- 8 5 10000000 -P
 Generator: RANLUX (luxury level 1, p = 48), lacunary tuples (0, 10, 14, 48, 58)
+Transparent huge pages: always [madvise] never
 Seed: 0x0000000000000000
-Running a 5-dimensional collision test using 10 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (10000000 points, 64-bit cells, 10000000 memory locations, 0.075 GiB RAM)
+Running a 5-dimensional collision test using 20 parallel generators (jump-ahead) on the upper 8 bits of the full 64-bit output (10000000 points, 64-bit cells, 10000000 memory locations, 0.075 GiB RAM)
 u: 8 t: 5 cells: 1099511627776 expected collisions: 45.4745926780923
-Pass 1/1: gen...[0.178s] sort...[0.015s] count...[0.001s], 10000000 points, 4954 collisions, p=1e-307
+Pass 1/1: gen...[0.127s] sort...[0.020s] count...[0.002s], 10000000 points, 4954 collisions, p=1e-307
 4954	p=1e-307
-Test completed in 0.20 seconds
+Test completed in 0.15 seconds
 4954	p=1e-307
 ```
 
