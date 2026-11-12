@@ -150,7 +150,7 @@ impl Args {
         // underflow the tradeoff bound.
         if self.decimation_bits.is_some() {
             if self.m.is_none() {
-                Self::die("--decimation-bits requires explicit -m");
+                Self::die("--decimation-bits requires an explicit m");
             }
             if d < 1 {
                 Self::die("--decimation-bits d must be at least 1");

@@ -29,7 +29,7 @@ use crate::util::{Stopwatch, parallelism, superscript};
 /// Allocates a memory-mapped buffer of `n` elements of type `T`, prefaulting it
 /// as transparent huge pages.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// [`MmapFlags::POPULATE`] would prefault the buffer as base (4 KiB) pages, so
 /// we use [`MmapFlags::TRANSPARENT_HUGE_PAGES`] and prefault the buffer by
@@ -246,7 +246,7 @@ impl GridParams<'_> {
 /// Returns the number of pairs of adjacent equal elements of a sorted slice,
 /// that is, the number of elements minus the number of distinct elements.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// The slice is split into contiguous chunks, and pairs straddling chunk
 /// boundaries are counted separately: on very large slices, this is much
@@ -292,7 +292,7 @@ pub(crate) fn count_adjacent_equals<T: Cell>(v: &[T]) -> usize {
 /// checkpoints need not merge runs into a single sorted sequence, which would
 /// rewrite all the points seen so far at each checkpoint.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// `stage` is split into chunks that are processed in parallel. Each chunk
 /// locates by binary search the range of each run between its smallest and
@@ -559,7 +559,7 @@ pub(crate) fn gen_pass_dispatch<T: Cell>(
 /// moves the points so that they occupy the first *n* = Σ `used` positions of
 /// `buf`, in no particular order (all callers sort them next).
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// The gaps lying below position *n* are filled with the points lying at or
 /// above it, of which there are exactly as many. Since the two sets of
@@ -672,7 +672,7 @@ const LANES: usize = 4;
 /// each sample with the state from which the sample must be drawn, and leaves in
 /// `prng` the state after the scan.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// If the generator can jump ahead and `len` is large enough, the samples are
 /// split into [`LANES`] contiguous ranges that are scanned in an interleaved
@@ -913,7 +913,7 @@ pub fn compute_lambda_and_points(args: &Args, cells: &BigUint) -> (f64, usize) {
 /// distributions of the repetitions, each conditioned on the number of points
 /// actually kept (which differs from `points` only under decimation).
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// The specialization of the runner is chosen once per test: `DIM` is the
 /// dimension *t* if *t* ≤ 8, so that the draw loop can be unrolled, and zero
@@ -1000,7 +1000,8 @@ pub fn run_test<T: Cell>(args: &Args, points: usize, cells: &BigUint, lambda: f6
     );
 
     let mut mapped = alloc_mmap::<T>(buf_len);
-    let buf: &mut [T] = bytemuck::try_cast_slice_mut(&mut mapped).unwrap();
+    let buf: &mut [T] = bytemuck::try_cast_slice_mut(&mut mapped)
+        .expect("a mapped buffer is aligned, and its size is a multiple of that of a cell");
 
     let params = GridParams {
         u: args.u,

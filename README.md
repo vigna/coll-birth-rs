@@ -160,7 +160,7 @@ examination, but decimation looks farther into the orbit. Moreover, space-time
 tradeoffs are a technique to implement the collision and the birthday-spacings
 tests, whereas decimation is a variant on the tests.
 
-What is pretty clear is that repeating the tests is the most expensive and less
+What is pretty clear is that repeating the tests is the most expensive and least
 effective technique.
 
 # Usage
@@ -194,7 +194,7 @@ we used the pretty-printing option `-p` to switch to a more accurate display
 when the result is close to one.
 
 As we mentioned, since there are no collisions using decimation on 2*b*/_t_ bits
-(here _t_ = 1, so 4 bits) per dimension (i.e., 64 billion undecimated points)
+(here _t_ = 1, so 4 bits) per dimension (i.e., 128 billion undecimated points)
 would give an essentially equivalent result:
 
 ```text
@@ -212,7 +212,7 @@ Test completed in 41.39 seconds
 
 The minuscule difference in the _p_-value is due to the discrepancy between the
 target number of decimated points (8 billions) and the actual number of
-decimated points (7999985821) obtained from 64 billion points.
+decimated points (7999985821) obtained from 128 billion points.
 
 Also repeating the test 16 times on 8 billion points would be equivalent (as
 1.7347 · 16 = 27.7552):

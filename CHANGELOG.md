@@ -1,6 +1,6 @@
 # Change Log
 
-## [Unreleased]
+## [0.3.3] - 2026-11-12
 
 ### New
 
@@ -12,7 +12,24 @@
   only dimension accepted is the weight of the relation (3, 5, 8, 16, and 23 at
   the respective luxury levels).
 
+- The `sirius64` feature for Zapparoli's Sirius64
+  (<https://github.com/matteo65/Sirius64>).
+
 ### Changed
+
+- The birthday-spacings test now reports the time of the sort and count of each
+  spacing class.
+
+- *p*-values are never printed as 0 or 1: tails smaller than 1e-307, including
+  those that underflow, are printed as 1e-307 or 1 − 1e-307, and left tails so
+  small that 1 − ε rounds to 1 are printed as 1 − ε also without `-p`.
+
+- With at least 64 threads, progress lines report the phases following
+  generation as `partition...` and `sort+count...` (or `sort+filter...`).
+
+- The `Cell` trait has a new required method `low_u64`.
+
+### Improved
 
 - Checkpoints (`-c`) no longer merge each stage into a sorted accumulator:
   stages are stored as sorted runs, and the number of collisions is updated
@@ -24,8 +41,7 @@
   the points are partitioned in place into buckets by a digit, and each bucket
   is sorted and processed on its own, in parallel. On many cores this is about
   twice as fast, as the global data movement of the multithreaded radix sort
-  was mostly sequential. Progress lines then report the phases as
-  `partition...` and `sort+count...` (or `sort+filter...`).
+  was mostly sequential.
 
 - Each thread scans its samples in four interleaved ranges reached by
   jump-ahead, so that the latencies of the state transitions overlap; this
@@ -41,14 +57,12 @@
   between thread regions with the points beyond the final count, instead of
   shifting the regions leftward, which is much faster.
 
-- The birthday-spacings test now reports the time of the sort and count of each
-  spacing class.
+### Fixed
 
-- *p*-values are never printed as 0 or 1: tails smaller than 1e-307, including
-  those that underflow, are printed as 1e-307 or 1 − 1e-307, and left tails so
-  small that 1 − ε rounds to 1 are printed as 1 − ε also without `-p`.
+- The combination of an MWC feature with lag one and `LACUNARY` did not pass
+  `cargo clippy`.
 
-## [0.3.2] 2026-10-24
+## [0.3.2] - 2026-10-24
 
 ### New
 

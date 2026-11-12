@@ -105,7 +105,7 @@ impl_cell!(u128, 128);
 /// the top of an output of [`next_u64()`] shifted left by *s*. Decimation is
 /// handled by [`decimate_once`].
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// If `DIM` is nonzero, it is used as the dimension *t* in place of `t_rt`, so
 /// that the loop can be unrolled. `FULL` can be true only if *u* = 64 and

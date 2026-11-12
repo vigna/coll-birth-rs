@@ -87,7 +87,7 @@ pub(crate) struct Buckets {
 /// (included) to `shift` + *k* (excluded), and returns the start of each of the
 /// 2ᵏ buckets, plus the length of `c`.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// The partition is an American-flag sort (in-place cycle leader) on the top
 /// [`PASS_BITS`] bits of the digit, followed, if there are more bits, by a

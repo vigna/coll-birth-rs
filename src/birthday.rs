@@ -122,7 +122,11 @@ pub(crate) fn compute_spacings<T: Cell>(v: &mut [T], cells: &BigUint) {
         v[0] = T::from_u64(1);
     } else {
         // min + (cells - 1 - max) + 1: every intermediate fits, since min < max.
-        let cells_m1 = T::from_u128((cells - BigUint::from(1u8)).to_u128().unwrap());
+        let cells_m1 = T::from_u128(
+            (cells - BigUint::from(1u8))
+                .to_u128()
+                .expect("there are at most 2¹²⁸ cells"),
+        );
         v[0] += cells_m1 - global_max;
         v[0] += T::from_u64(1);
     }
@@ -184,7 +188,11 @@ pub fn run_birthday_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool, co
     let scan_len = scan_samples(points, t, d);
     // cells itself may be unrepresentable (2ᴺ in N-bit storage); cells − 1 always
     // is, and the wrap-around spacing is evaluated through it.
-    let cells_m1 = T::from_u128((params.cells - BigUint::from(1u8)).to_u128().unwrap());
+    let cells_m1 = T::from_u128(
+        (params.cells - BigUint::from(1u8))
+            .to_u128()
+            .expect("there are at most 2¹²⁸ cells"),
+    );
 
     // The points of an interval (about points / 2ᵇ, plus headroom).
     let mut scratch: Vec<T> = vec![T::ZERO; buffer_size(scan_len, t * d + b)];
@@ -388,7 +396,11 @@ pub fn run_birthday_parallel<T: Cell>(
     let spacing_mask = T::low_bits_mask(b);
     // cells itself may be unrepresentable (2ᴺ in N-bit storage); cells − 1 always
     // is, and the wrap-around spacing is evaluated through it.
-    let cells_m1 = T::from_u128((cells - BigUint::from(1u8)).to_u128().unwrap());
+    let cells_m1 = T::from_u128(
+        (cells - BigUint::from(1u8))
+            .to_u128()
+            .expect("there are at most 2¹²⁸ cells"),
+    );
 
     let scan_total = scan_samples(points, t, d);
     let mut partition = OrbitPartition::new(seed, num_cpus, scan_total, t);
@@ -497,7 +509,8 @@ pub fn run_birthday_parallel<T: Cell>(
 
         for j in pass_lo..pass_hi {
             let class_target = T::from_u64(j);
-            let class: &mut [T] = bytemuck::try_cast_slice_mut(&mut class_buf).unwrap();
+            let class: &mut [T] = bytemuck::try_cast_slice_mut(&mut class_buf)
+                .expect("a mapped buffer is aligned, and its size is a multiple of that of a cell");
             let mut class_len = 0usize;
             let mut prev_max: Option<T> = None;
             let mut global_min: Option<T> = None;
@@ -515,7 +528,9 @@ pub fn run_birthday_parallel<T: Cell>(
                 );
                 // Phase 1: generate the points of interval k into a contiguous
                 // buffer.
-                let unit: &mut [T] = bytemuck::try_cast_slice_mut(&mut interval_buf).unwrap();
+                let unit: &mut [T] = bytemuck::try_cast_slice_mut(&mut interval_buf).expect(
+                    "a mapped buffer is aligned, and its size is a multiple of that of a cell",
+                );
                 let total = gen_unit_contiguous::<T>(
                     unit, &caps, &snapshots, &params, &chunk, k, b, decimating, full,
                 );
@@ -618,7 +633,9 @@ pub fn run_birthday_parallel<T: Cell>(
                     };
                     let spacing_at = |i: usize| {
                         if i == 0 {
-                            interval[0] - prev_max.unwrap()
+                            interval[0]
+                                - prev_max
+                                    .expect("the first point of the first interval is skipped")
                         } else {
                             interval[i] - interval[i - 1]
                         }

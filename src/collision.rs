@@ -189,7 +189,7 @@ pub fn run_collision_tradeoff<T: Cell, const DIM: usize, const DECIMATE: bool>(
 ///
 /// Returns the number of collisions and the number of points actually kept.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// With checkpoints, the points of each stage are sorted in an auxiliary buffer
 /// and merged right to left into the sorted prefix of `buf`, so the cost of
@@ -447,7 +447,9 @@ pub fn run_test_parallel<T: Cell>(
                 let snapshots =
                     partition.snapshots((rep - 1) * scan_total + scanned, stage, &boundaries, None);
 
-                let acc_slice: &mut [T] = bytemuck::try_cast_slice_mut(&mut acc).unwrap();
+                let acc_slice: &mut [T] = bytemuck::try_cast_slice_mut(&mut acc).expect(
+                    "a mapped buffer is aligned, and its size is a multiple of that of a cell",
+                );
                 let stage_regions = thread_cap * stage_cpus;
                 // The accumulator has a limited headroom.
                 if acc_len + stage_regions > acc_slice.len() {
@@ -531,7 +533,8 @@ pub fn run_test_parallel<T: Cell>(
             let mut psw = Stopwatch::new();
             eprint!("Pass {}/{}: gen...", pass + 1, num_passes);
 
-            let buf: &mut [T] = bytemuck::try_cast_slice_mut(&mut buf_mmap).unwrap();
+            let buf: &mut [T] = bytemuck::try_cast_slice_mut(&mut buf_mmap)
+                .expect("a mapped buffer is aligned, and its size is a multiple of that of a cell");
 
             // Phase 1: generate the points of the pass into a contiguous
             // buffer.

@@ -47,6 +47,10 @@ jobs:
           - "mwc_192_64_0xff4e24dd418f5433,MWCX"
           - "mwc_256_64_0xff32e7e2bdcb0a33,MWCX"
           - "mwc_128_32_0xffcccc66,MWCX"
+          - "mwc_128_64_0xff6da236274e252e,LACUNARY"
+          - "mwc_192_64_0xff4e24dd418f5433,LACUNARY"
+          - "mwc_256_64_0xff32e7e2bdcb0a33,LACUNARY"
+          - "mwc_128_32_0xffcccc66,MWCX,LACUNARY"
           - splitmix
           - incr
           - wyrand
@@ -69,6 +73,7 @@ jobs:
           - "ranlux_2,LACUNARY"
           - "ranlux_3,LACUNARY"
           - "ranlux_4,LACUNARY"
+          - sirius64
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
@@ -99,6 +104,10 @@ jobs:
           - "mwc_192_64_0xff4e24dd418f5433,MWCX"
           - "mwc_256_64_0xff32e7e2bdcb0a33,MWCX"
           - "mwc_128_32_0xffcccc66,MWCX"
+          - "mwc_128_64_0xff6da236274e252e,LACUNARY"
+          - "mwc_192_64_0xff4e24dd418f5433,LACUNARY"
+          - "mwc_256_64_0xff32e7e2bdcb0a33,LACUNARY"
+          - "mwc_128_32_0xffcccc66,MWCX,LACUNARY"
           - splitmix
           - incr
           - wyrand
@@ -121,6 +130,7 @@ jobs:
           - "ranlux_2,LACUNARY"
           - "ranlux_3,LACUNARY"
           - "ranlux_4,LACUNARY"
+          - sirius64
     steps:
       - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable

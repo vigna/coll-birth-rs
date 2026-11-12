@@ -461,7 +461,8 @@ mod lacunary {
         #[inline(always)]
         pub fn next_u64(&mut self) -> u64 {
             if self.pos == 2 {
-                // Discard *x*ₙ₊₂, …, *x*ₙ₊ₖ
+                // Discard *x*ₙ₊₂, …, *x*ₙ₊ₖ (nothing, if the lag is one)
+                #[allow(clippy::reversed_empty_ranges)]
                 for _ in 1..Mwc::LAG {
                     self.mwc.next_u64();
                 }
@@ -496,7 +497,7 @@ mod lacunary {
         use super::{Mwc, Prng};
 
         #[test]
-        fn triples() {
+        fn test_triples() {
             let mut lacunary = Prng::new(42);
             let mut mwc = Mwc::new(42);
             for _ in 0..1000 {
@@ -508,7 +509,7 @@ mod lacunary {
         }
 
         #[test]
-        fn skip() {
+        fn test_skip() {
             for start in 0..7 {
                 for n in [0, 1, 2, 3, 4, 5, 6, 7, 299, 300, 301, 1000] {
                     let mut skipped = Prng::new(42);
@@ -517,7 +518,9 @@ mod lacunary {
                         skipped.next_u64();
                         stepped.next_u64();
                     }
-                    skipped.try_skip(n).unwrap();
+                    skipped
+                        .try_skip(n)
+                        .expect("try_skip failed on a skip-capable generator");
                     for _ in 0..n {
                         stepped.next_u64();
                     }
@@ -911,7 +914,9 @@ mod ranlux {
                         skipped.next_u64();
                         stepped.next_u64();
                     }
-                    skipped.try_skip(n).unwrap();
+                    skipped
+                        .try_skip(n)
+                        .expect("try_skip failed on a skip-capable generator");
                     for _ in 0..n {
                         stepped.next_u64();
                     }
@@ -1472,13 +1477,13 @@ mod skip_tests {
     // For generators without jump-ahead (try_skip returns Err), there is
     // nothing to verify and the test passes trivially.
     #[test]
-    fn test_skip_matches_repeated_next() -> anyhow::Result<()> {
+    fn test_skip_matches_repeated_next() {
         let seed = 0x0123_4567_89ab_cdef;
         // Cheap-to-step values (sequential stepping must stay fast).
         for &n in &[0u64, 1, 2, 7, 1000, 100_000] {
             let mut a = Prng::new(seed);
             if a.try_skip(n).is_err() {
-                return Ok(()); // generator has no jump-ahead; nothing to check
+                return; // generator has no jump-ahead; nothing to check
             }
             let mut b = Prng::new(seed);
             for _ in 0..n {
@@ -1494,14 +1499,14 @@ mod skip_tests {
         }
         // Composition: two successive skips must equal one combined skip. Trivial
         // for counter generators; exercises the doubling (LCG) and modpow (MWC)
-        // jump-ahead with large exponents once those generators gain try_skip.
+        // jump-ahead with large exponents.
         let (x, y) = (1u64 << 40, (1u64 << 41) + 12_345);
-        let skip_err = |()| anyhow::anyhow!("try_skip failed on a skip-capable generator");
+        let skip_err = "try_skip failed on a skip-capable generator";
         let mut p = Prng::new(seed);
-        p.try_skip(x).map_err(skip_err)?;
-        p.try_skip(y).map_err(skip_err)?;
+        p.try_skip(x).expect(skip_err);
+        p.try_skip(y).expect(skip_err);
         let mut q = Prng::new(seed);
-        q.try_skip(x + y).map_err(skip_err)?;
+        q.try_skip(x + y).expect(skip_err);
         for k in 0..64 {
             assert_eq!(
                 p.next_u64(),
@@ -1509,6 +1514,5 @@ mod skip_tests {
                 "skip composition failed at output {k}"
             );
         }
-        Ok(())
     }
 }

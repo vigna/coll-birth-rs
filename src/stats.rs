@@ -94,7 +94,7 @@ impl Null {
     /// with the same mean and variance if it is at least
     /// [`NORMAL_VARIANCE_RATIO`] times the mean, and normal otherwise.
     ///
-    /// # Implementation Details
+    /// # Implementation Notes
     ///
     /// The variance of the number of collisions is about 1 − 4α/3 times its
     /// mean when the density α is small, and 0.26 times its mean at α = 1. The
@@ -175,7 +175,7 @@ pub struct PoissonTails {
 /// Returns [`None`] when `lambda` is not a valid Poisson rate or `coll` is not
 /// a non-negative integer representable as [`u64`].
 ///
-/// # Implementation notes
+/// # Implementation Notes
 ///
 /// [`DiscreteCdf::ccdf`] returns `Pr[X > s]`; computing `Pr[X >= coll]`
 /// therefore evaluates the complementary CDF at `coll - 1`. The `coll == 0`
@@ -248,7 +248,7 @@ pub fn expected_collisions(points: f64, cells: f64) -> f64 {
 /// *k*(*k* − 1)*b* + *ka* − *k*²*a*², where *a* = (1 − 1/*k*)*ⁿ* and *b* = (1 −
 /// 2/*k*)*ⁿ*.
 ///
-/// # Implementation Details
+/// # Implementation Notes
 ///
 /// To avoid cancellation, we compute *k*(*a* − *b*) + *k*²(*b* − *a*²) using
 /// *b*/*a* = (1 − 1/(*k* − 1))*ⁿ* and *b*/*a*² = (1 − 1/(*k* − 1)²)*ⁿ*, through

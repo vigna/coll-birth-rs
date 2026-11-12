@@ -74,11 +74,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_superscript() -> anyhow::Result<()> {
+    fn test_superscript() {
         assert_eq!(superscript(0u32), "⁰");
         assert_eq!(superscript(64usize), "⁶⁴");
         assert_eq!(superscript(1234567890u64), "¹²³⁴⁵⁶⁷⁸⁹⁰");
         assert_eq!(superscript(-5i32), "⁻⁵");
-        Ok(())
     }
 }
