@@ -54,7 +54,6 @@ jobs:
           - splitmix
           - incr
           - wyrand
-          - wyrand-reinerp
           - romuduo
           - romuduojr
           - romutrio
@@ -111,7 +110,6 @@ jobs:
           - splitmix
           - incr
           - wyrand
-          - wyrand-reinerp
           - romuduo
           - romuduojr
           - romutrio

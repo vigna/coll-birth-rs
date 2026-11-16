@@ -165,8 +165,8 @@ effective technique.
 
 # Usage
 
-The generator to test is selected at compilation time using [Cargo features].
-For example,
+The generator to test is selected at compilation time using [Cargo features]:
+the available generators are listed in the [features section]. For example,
 
 ```text
 cargo run -r -F splitmix -- 64 1 8000000000 -b 2 -p -P
@@ -235,29 +235,78 @@ Test completed in 444.22 seconds
 0	p=1 − 8.828901494125378e-13
 ```
 
-The `MWCX` feature can be combined with any MWC generator feature to apply the
-scrambler X, which xors the output digit with the carry of the same state, as
-in [Thomas's MWC64X]:
+# Features
 
-```text
-cargo run -r -F mwc_192_64_0xff4e24dd418f5433,MWCX -- 36 3 -B -P
-```
+Exactly one _generator feature_ must be enabled (there is no default, and the
+build fails with an explicit error if none is selected); two _modifier
+features_, `MWCX` and `LACUNARY`, can be added to some generator features to
+change which outputs are tested.
 
-The `LACUNARY` feature can be combined with any MWC generator feature (and
-with `MWCX`) to test the lacunary triples (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁) of a
-generator with lag *k*: from each block of *k* + 2 consecutive outputs, the
-generator returns those of index 0, 1, and *k* + 1, so a three-dimensional
-test (the only one accepted) builds each point from a lacunary triple:
+## Generator features
 
-```text
-cargo run -r -F mwc_192_64_0xff4e24dd418f5433,LACUNARY -- 36 3 -B -P
-```
+In the following table, “bits” is the number of output bits: generators with
+fewer than 64 bits return their output in the upper bits, so *u* + *s* should
+not exceed that number, as the remaining bits are zero (for RANLUX, this is
+enforced). The last column specifies how the parallel generators of `-P` reach
+their starting points: generators that can jump ahead do it at no cost, whereas
+the others need a sequential pre-scan of the output.
 
-The features `ranlux_0`, …, `ranlux_4` select RANLUX at the given luxury level.
-Since its outputs have 24 bits, *u* + *s* must be at most 24. Combined with a
-RANLUX feature, the `LACUNARY` feature returns the outputs involved in a sparse
-linear relation among those kept by the generator, and the only dimension
-accepted is the weight of the relation (see [below]).
+| Feature                                                    | Generator                                                                           | Bits | `-P`       |
+|:-----------------------------------------------------------|:------------------------------------------------------------------------------------|-----:|:-----------|
+| `splitmix`                                                 | [SplitMix]: a counter with golden-ratio increment followed by a mixing function     |   64 | jump-ahead |
+| `sirius64`                                                 | Zapparoli's [Sirius64]: a counter with golden-ratio increment followed by a mixing function |   64 | jump-ahead |
+| `wyrand`                                                   | [WyRand]: a counter followed by a folded 64×64 → 128 bit multiplication             |   64 | jump-ahead |
+| `MSWS-CTR`                                                 | Widynski's [Squares] (64-bit output, five rounds) with key `0x9e3779b97f4a7c15`: a counter-based version of his [middle-square Weyl-sequence generator] |   64 | jump-ahead |
+| `romuduo`, `romuduojr`, `romutrio`                         | Overton's [Romu] generators RomuDuo, RomuDuoJr, and RomuTrio                        |   64 | pre-scan   |
+| `romutrio32`                                               | Overton's [Romu] generator RomuTrio32                                               |   32 | pre-scan   |
+| `lcg_32_32_0xec65035`, `lcg_32_32_0x915f77f5`              | The affine congruential generator *x* ↦ *ax* + 1 mod 2³²                            |   32 | jump-ahead |
+| `lcg_64_64_0xa5b9ee81534fa94d`                             | The affine congruential generator *x* ↦ *ax* + 1 mod 2⁶⁴                            |   64 | jump-ahead |
+| `mwc_128_64_0xff96d28c3f3329da`, `mwc_128_64_0xffebb71d94fcdaf9`, `mwc_128_64_0xff6da236274e252e` | A multiply-with-carry generator with 64-bit digits and lag 1 |   64 | jump-ahead |
+| `mwc_192_64_0xffa04e67b3c95d86`, `mwc_192_64_0xff4e24dd418f5433` | A multiply-with-carry generator with 64-bit digits and lag 2                  |   64 | jump-ahead |
+| `mwc_256_64_0xfff62cf2ccc0cdaf`, `mwc_256_64_0xff32e7e2bdcb0a33` | A multiply-with-carry generator with 64-bit digits and lag 3                  |   64 | jump-ahead |
+| `mwc_128_32_0xfffea2df`, `mwc_128_32_0xffcccc66`           | A multiply-with-carry generator with 32-bit digits and lag 3                        |   32 | jump-ahead |
+| `ranlux_0`, `ranlux_1`, `ranlux_2`, `ranlux_3`, `ranlux_4` | [RANLUX] at the given luxury level (see [below])                                    |   24 | jump-ahead |
+| `incr`                                                     | A counter (*x* ↦ *x* + 1), useful only for sanity checks and as a baseline          |   64 | jump-ahead |
+
+The names of the features of congruential and multiply-with-carry generators
+have the form `lcg_S_W_A` and `mwc_S_W_A`, where `S` is the number of bits of
+state, `W` is the number of bits of output, and `A` is the multiplier; the output of a
+congruential generator is its whole state, whereas that of a multiply-with-carry
+generator is the most recent digit of its state. The multipliers
+`0xff6da236274e252e`, `0xff4e24dd418f5433`, `0xff32e7e2bdcb0a33`, and
+`0xffcccc66` are those suggested in “[Scrambled Multiply-with-Carry
+Pseudorandom Number Generators]”; `0xff96d28c3f3329da` has a particularly bad figure of merit
+*f*₃ (≈ 9.17 · 10⁻⁹), and `0xa5b9ee81534fa94d` a particularly good figure of
+merit *f*₂ (see the [example below]).
+
+## Modifier features
+
+Modifier features do not select a generator: they must be combined with a
+generator feature of the right kind, or the build fails with an explicit error.
+The name printed in the `Generator:` line reflects the modifiers in use.
+
+- `MWCX` can be combined with any `mwc_*` feature to apply the scrambler X,
+  which xors the output digit with the carry of the same state, as in [Thomas's
+  MWC64X]:
+
+  ```text
+  cargo run -r -F mwc_192_64_0xff4e24dd418f5433,MWCX -- 36 3 -B -P
+  ```
+
+- `LACUNARY` can be combined with any `mwc_*` feature (and with `MWCX`) to test
+  the lacunary triples (*x*ₙ, *x*ₙ₊₁, *x*ₙ₊ₖ₊₁) of a generator with lag *k*:
+  from each block of *k* + 2 consecutive outputs, the generator returns those of
+  index 0, 1, and *k* + 1, so a three-dimensional test (the only one accepted)
+  builds each point from a lacunary triple:
+
+  ```text
+  cargo run -r -F mwc_192_64_0xff4e24dd418f5433,LACUNARY -- 36 3 -B -P
+  ```
+
+- `LACUNARY` can also be combined with any `ranlux_*` feature: in this case, the
+  generator returns the outputs involved in a sparse linear relation among those
+  kept by RANLUX, and the only dimension accepted is the weight of the relation,
+  that is, 3, 5, 8, 16, and 23 for luxury levels 0 to 4 (see [below]).
 
 # Adding your own generator
 
@@ -465,6 +514,14 @@ stimulated me to investigate space-time tradeoffs and publish this crate.
 [`u128`]: https://doc.rust-lang.org/std/primitive.u128.html
 [`try_skip`]: https://docs.rs/coll-birth/latest/coll_birth/prng/struct.Prng.html#method.try_skip
 [below]: #example-ranlux
+[features section]: #features
+[example below]: #example-an-affine-congruential-generator-that-is-too-good
+[SplitMix]: https://doi.org/10.1145/2660193.2660195
+[Sirius64]: https://github.com/matteo65/Sirius64
+[Romu]: https://arxiv.org/abs/2002.11331
+[Squares]: https://arxiv.org/abs/2004.06278
+[middle-square Weyl-sequence generator]: https://arxiv.org/abs/1704.00358
+[Scrambled Multiply-with-Carry Pseudorandom Number Generators]: https://arxiv.org/abs/2610.27313
 [`prng`]: https://docs.rs/coll-birth/latest/coll_birth/prng/index.html
 [WyRand]: https://github.com/wangyi-fudan/wyhash
 [WyHash]: https://github.com/wangyi-fudan/wyhash
